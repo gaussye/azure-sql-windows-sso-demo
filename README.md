@@ -2,7 +2,34 @@
 
 用户已使用 Microsoft Entra 账户登录 Windows，客户端通过 WAM 获取当前用户令牌并连接 Azure SQL，查询时不输入 SQL 密码、不执行 `az login`、不弹出登录窗口。**不要求 Azure VM，不使用托管身份。**
 
-按以下顺序完成配置。首次 Windows 登录、应用同意和数据库授权需预先完成；策略要求重新登录或 MFA 时，本示例失败退出，不自动弹窗。Portal 配置图由 GitHub Copilot Computer Use 从真实页面截取，仅裁剪并遮盖敏感信息。
+## 调用链路与实现机制
+
+### 调用链路
+
+```text
+前置：用户以 Entra 账户登录 Windows，操作系统建立登录状态（PRT）
+
+当前用户桌面中的 .NET 客户端
+  → MSAL：AcquireTokenSilent + OperatingSystemAccount
+  → Windows WAM（系统身份验证代理）
+      → 使用代理缓存；需要时借助已有 Windows 登录状态向 Entra ID 申请令牌
+      ← 获得面向 Azure SQL、代表当前用户的访问令牌
+  ← MSAL 返回访问令牌
+  → SqlClient：设置 SqlConnection.AccessToken，经 TLS 连接目标数据库
+  → Azure SQL：验证令牌 → 识别 Entra 用户／组 → 检查数据库权限
+  ← 返回获准查询的数据
+```
+
+### 为什么可以静默连接
+
+1. **复用 Windows 登录，不重新收集密码。** 本例设备已加入 Entra，用户已登录并具备 PRT（Primary Refresh Token，主刷新令牌）。WAM 是 Windows 的 Web Account Manager，负责利用系统账户状态及代理缓存获取令牌；应用不读取 PRT，也不把 PRT 发送给 SQL。
+2. **应用代表用户，而不是使用自己的服务身份。** MSAL 通过 WAM 为 `OperatingSystemAccount` 静默请求 SQL 令牌。Client ID 标识公共客户端，Tenant ID 指定租户；预先完成的 `user_impersonation` 单用户同意允许应用代表该用户访问 SQL，不需要客户端密码或证书。
+3. **令牌认证与数据库授权分开。** 客户端将访问令牌交给 SqlClient，通过启用证书校验的 TLS 连接发送给 Azure SQL。SQL 验证令牌的签发者、目标资源和有效期等，再按目标数据库中的 Entra 用户／组及其权限决定是否允许查询；应用同意本身不会授予 SELECT。
+4. **静默不等于绕过 MFA 或组织策略。** 初次身份验证已在 Windows 登录等前置流程完成。若当前状态不足、尚未同意或策略要求交互，`AcquireTokenSilent` 会失败；本例不调用 `AcquireTokenInteractive`，也不回退到 CLI、密码或托管身份。
+
+**后续配置分别解决：** 客户端的 Windows／WAM 状态与应用授权（第 1 节）、SQL 网络与数据库权限（第 2 节）、令牌获取及连接代码（第 3 节）。网络连通是独立前提，取得令牌不会自动放通 SQL 防火墙。
+
+以下 Portal 配置图由 GitHub Copilot Computer Use 从真实页面截取，仅裁剪并遮盖敏感信息。
 
 ## 1. 客户端配置
 
