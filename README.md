@@ -27,7 +27,7 @@ Windows 当前用户 → WAM / 已有登录状态（PRT）→ 用户访问令牌
 
 ### Entra 应用：管理员一次性配置
 
-在 **Microsoft Entra 管理中心 → 应用注册 → 新注册**创建专用应用，然后填写：
+在 **Azure Portal → Microsoft Entra ID → 应用注册 → 新注册**创建专用应用，然后填写：
 
 | 位置／配置项 | 具体设置 |
 | --- | --- |
@@ -35,11 +35,25 @@ Windows 当前用户 → WAM / 已有登录状态（PRT）→ 用户访问令牌
 | 概述 | 记录 Directory (tenant) ID 和 Application (client) ID，分别作为 `<TENANT_ID>`、`<CLIENT_ID>` |
 | 身份验证 → 添加平台 | **移动和桌面应用程序** |
 | Redirect URI | `ms-appx-web://microsoft.aad.brokerplugin/<CLIENT_ID>` |
-| 允许公共客户端流 | **是**，对应 `isFallbackPublicClient=true` |
+| 身份验证 → Settings → Allow public client flows | **Enabled（是）**，对应 `isFallbackPublicClient=true`；旧版页面名称为“允许公共客户端流” |
 | API 权限 → 添加权限 | **我的组织使用的 API → Azure SQL Database → 委托的权限 → user_impersonation** |
 | 密码／证书 | **不创建**；这是公共客户端 |
 
 若门户搜索名称不同，可按 Azure SQL 资源应用 ID `022907d3-0f1b-48f7-badc-1ba6abab6d66` 查找；`user_impersonation` 的权限 ID 为 `c39ef2d1-04ce-46dc-8b5f-e9a5c60f0fc9`。
+
+以下配置图均通过 GitHub Copilot Computer Use 从实际 Azure Portal 页面截取，仅裁剪并遮盖敏感信息，未修改配置值。
+
+**回调 URI：** 身份验证 → Redirect URI configuration，平台为 Mobile and desktop applications；黑色遮盖处为本应用的 Client ID，完整格式见上表。
+
+![Azure Portal 中的 WAM 桌面应用回调 URI，Client ID 已遮盖](docs/images/portal-wam-redirect.png)
+
+**公共客户端：** 同一页面的 Settings 中，Allow public client flows 为 Enabled。
+
+![Azure Portal 中已启用的公共客户端流](docs/images/portal-wam-public-client.png)
+
+**SQL API 权限：** API permissions 中为 Azure SQL Database 的 `user_impersonation`，类型为 Delegated。该图只展示应用声明的权限，Status 空白不能用于判断某个用户是否已完成同意。
+
+![Azure Portal 中 Azure SQL 的 user_impersonation 委托权限](docs/images/portal-sql-api-permission.png)
 
 **本例只给一个用户预先同意，不给全租户授权。** 由获授权的目录管理员通过 Microsoft Graph 创建以下授权；不要点击面向整个组织的“授予管理员同意”来替代：
 
@@ -69,6 +83,10 @@ Content-Type: application/json
 | SQL 服务器 → 网络 | 优先使用 Private Endpoint，并保证客户端 VPN／路由及 Private DNS 正常；若组织允许公共访问，仅允许真实客户端 SQL 出口 IP |
 | 客户端连接 | 使用 `<SQL_SERVER_FQDN>,1433`；保留 `Encrypt=true`、`TrustServerCertificate=false` |
 | 数据库授权 | 为目标 Entra 用户／组创建 contained user，只授予查询所需权限 |
+
+**SQL 服务器 → Microsoft Entra ID：** 实际页面显示已配置 Entra 管理员，账户及对象 ID 已遮盖。图中还启用了“仅 Microsoft Entra 身份验证”；这是实验服务器的设置，**不是 WAM 的必要条件**，客户应按自身认证策略决定是否禁用 SQL 密码认证。
+
+![Azure Portal 中已配置的 SQL Entra 管理员与实验服务器的仅 Entra 认证设置](docs/images/portal-sql-entra-admin.png)
 
 网络需符合客户策略；不要用策略例外标签或放宽整个 Internet 地址范围解决连接问题。Azure SQL Redirect 连接策略可能还需要额外数据端口，按实际网络架构配置。
 
@@ -257,7 +275,7 @@ if ($LASTEXITCODE -ne 0) { throw '第二次验证失败' }
 
 ![两个独立进程的实际 WAM 和 SQL 测试结果文件展示，用户及租户标识已脱敏](docs/images/wam-silent-results.png)
 
-**截图说明：** 两张图是既有实测结果文件的脱敏展示截图，不是 Azure 门户配置页，也不是原始运行时终端截图；未为制作截图重新执行云测试。身份字段替换为 `<REDACTED>`，状态与查询结果保持原值。原测试账户已是服务器 Entra 管理员，所以文件中 `databaseUser` 为 `dbo`；客户应使用第 2 节的最小权限用户／组，不需要管理员身份。
+**结果图说明：** 本节结果图与第 1 节 Windows 状态图是既有实测结果文件的脱敏展示截图，不是原始运行时终端截图；与上面的真实 Azure Portal 配置截图来源不同，未为制作截图重新执行云测试。身份字段替换为 `<REDACTED>`，状态与查询结果保持原值。原测试账户已是服务器 Entra 管理员，所以文件中 `databaseUser` 为 `dbo`；客户应使用第 2 节的最小权限用户／组，不需要管理员身份。
 
 本例未使用 CLI／托管身份凭据或自定义持久化令牌缓存；WAM 本身会维护 Windows 登录与令牌状态。已有 SQL 工具必须支持 WAM 或安全的令牌注入，不能仅凭 `sqlcmd -G` 推断可用。
 
