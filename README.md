@@ -1,16 +1,12 @@
 # 客户示例：使用 Windows WAM 静默访问 Azure SQL
 
-**场景：** 用户已经使用 Microsoft Entra 账户登录 Windows，应用通过 WAM 获取当前用户的令牌，再连接 Azure SQL。查询时不需要 SQL 密码、`az login`、浏览器弹窗或再次交互式 MFA。普通本地 Windows 电脑即可，**不要求 Azure VM，也不使用托管身份**。
+用户已使用 Microsoft Entra 账户登录 Windows，客户端通过 WAM 获取当前用户令牌并连接 Azure SQL，查询时不输入 SQL 密码、不执行 `az login`、不弹出登录窗口。**不要求 Azure VM，不使用托管身份。**
 
-```text
-Windows 当前用户 → WAM / 已有登录状态（PRT）→ 用户访问令牌 → Azure SQL
-```
-
-以下是已验证的具体配置示例。首次 Windows 登录、应用同意和数据库授权需要预先完成；如果组织策略要求重新登录或 MFA，本示例明确失败，不自动弹窗。
+按以下顺序完成配置。首次 Windows 登录、应用同意和数据库授权需预先完成；策略要求重新登录或 MFA 时，本示例失败退出，不自动弹窗。Portal 配置图由 GitHub Copilot Computer Use 从真实页面截取，仅裁剪并遮盖敏感信息。
 
 ## 1. 客户端配置
 
-### Windows 电脑
+### 1.1 确认 Windows 登录状态
 
 | 配置项 | 本例配置 |
 | --- | --- |
@@ -21,41 +17,62 @@ Windows 当前用户 → WAM / 已有登录状态（PRT）→ 用户访问令牌
 | 开发环境 | .NET SDK 8.0.426，目标框架 `net8.0-windows` |
 | 客户端包 | `Microsoft.Data.SqlClient` 6.1.4、`Microsoft.Identity.Client.Broker` 4.77.0 |
 
-设备加入由客户 IT 按组织流程完成，可在 Windows **设置 → 账户 → 访问工作或学校**中核对。PRT 为 YES 之后，仍需完成下述应用和 SQL 授权。
-
 ![实测结果文件中的 Windows 设备加入与 PRT 状态，身份信息已脱敏](docs/images/wam-client-state.png)
 
-### Entra 应用：管理员一次性配置
+### 1.2 注册单租户应用
 
-在 **Azure Portal → Microsoft Entra ID → 应用注册 → 新注册**创建专用应用，然后填写：
+管理员打开 **Azure Portal → Microsoft Entra ID → App registrations（应用注册）→ New registration**：
 
-| 位置／配置项 | 具体设置 |
-| --- | --- |
-| 支持的账户类型 | 仅此组织目录中的账户（单租户） |
-| 概述 | 记录 Directory (tenant) ID 和 Application (client) ID，分别作为 `<TENANT_ID>`、`<CLIENT_ID>` |
-| 身份验证 → 添加平台 | **移动和桌面应用程序** |
-| Redirect URI | `ms-appx-web://microsoft.aad.brokerplugin/<CLIENT_ID>` |
-| 身份验证 → Settings → Allow public client flows | **Enabled（是）**，对应 `isFallbackPublicClient=true`；旧版页面名称为“允许公共客户端流” |
-| API 权限 → 添加权限 | **我的组织使用的 API → Azure SQL Database → 委托的权限 → user_impersonation** |
-| 密码／证书 | **不创建**；这是公共客户端 |
+1. Name 填写客户自己的应用名，例如 `WamSqlClient`。
+2. Supported account types 选择 **Single tenant only（仅本组织）**。
+3. Redirect URI 暂留空，点击 **Register**；下一步取得 Client ID 后再配置。
 
-若门户搜索名称不同，可按 Azure SQL 资源应用 ID `022907d3-0f1b-48f7-badc-1ba6abab6d66` 查找；`user_impersonation` 的权限 ID 为 `c39ef2d1-04ce-46dc-8b5f-e9a5c60f0fc9`。
+下图为注册表单入口展示，未为截图新建应用。
 
-以下配置图均通过 GitHub Copilot Computer Use 从实际 Azure Portal 页面截取，仅裁剪并遮盖敏感信息，未修改配置值。
+![Azure Portal 注册应用表单中的名称、单租户和可选回调 URI 字段](docs/images/portal-app-register.png)
 
-**回调 URI：** 身份验证 → Redirect URI configuration，平台为 Mobile and desktop applications；黑色遮盖处为本应用的 Client ID，完整格式见上表。
+### 1.3 记录 Tenant ID 和 Client ID
+
+打开该应用的 **Overview（概述）**，复制 **Directory (tenant) ID → `<TENANT_ID>`**、**Application (client) ID → `<CLIENT_ID>`**。不要将 Object ID 当作 Client ID。Supported account types 应为 **My organization only**。
+
+![Azure Portal 应用概述中的 Client ID、Tenant ID 与单租户状态，实际标识已遮盖](docs/images/portal-app-overview.png)
+
+### 1.4 配置 WAM 回调 URI
+
+打开 **Authentication → Add a platform → Mobile and desktop applications（移动和桌面应用程序）**，添加下面的自定义回调 URI 并保存，将 `<CLIENT_ID>` 替换为上一步的值：
+
+```text
+ms-appx-web://microsoft.aad.brokerplugin/<CLIENT_ID>
+```
+
+保存后在 **Redirect URI configuration** 核对平台和 URI。下图黑色遮盖处为实际 Client ID。
 
 ![Azure Portal 中的 WAM 桌面应用回调 URI，Client ID 已遮盖](docs/images/portal-wam-redirect.png)
 
-**公共客户端：** 同一页面的 Settings 中，Allow public client flows 为 Enabled。
+### 1.5 启用公共客户端
+
+在 **Authentication → Settings** 中将 **Allow public client flows** 设为 **Enabled** 并保存，对应 `isFallbackPublicClient=true`。这是公共客户端，**不创建密码或证书**。
 
 ![Azure Portal 中已启用的公共客户端流](docs/images/portal-wam-public-client.png)
 
-**SQL API 权限：** API permissions 中为 Azure SQL Database 的 `user_impersonation`，类型为 Delegated。该图只展示应用声明的权限，Status 空白不能用于判断某个用户是否已完成同意。
+### 1.6 添加 Azure SQL 委托权限
+
+打开 **API permissions → Add a permission → APIs my organization uses → Azure SQL Database → Delegated permissions**，勾选 **user_impersonation**，点击 **Add permissions**。
+
+搜索名称不可用时，使用 Azure SQL 固定资源应用 ID `022907d3-0f1b-48f7-badc-1ba6abab6d66`。保存后的列表应如下；这只表示应用声明的权限，不代表目标用户已同意。
 
 ![Azure Portal 中 Azure SQL 的 user_impersonation 委托权限](docs/images/portal-sql-api-permission.png)
 
-**本例只给一个用户预先同意，不给全租户授权。** 由获授权的目录管理员通过 Microsoft Graph 创建以下授权；不要点击面向整个组织的“授予管理员同意”来替代：
+### 1.7 管理员为目标用户预先同意
+
+**此步通过 Microsoft Graph 完成，不是 Portal 中的全组织授权按钮。** 本例仅授权一个用户，不点击上图的 **Grant admin consent** 来替代。
+
+<details>
+<summary>展开：管理员单用户授权请求及对象 ID</summary>
+
+管理员先取得三个对象 ID，再创建以下授权：`clientId` 为客户应用在 **Enterprise applications → 对应企业应用 → Overview** 中的对象 ID；`resourceId` 为 Azure SQL 服务主体在客户租户内的对象 ID；`principalId` 为 **Microsoft Entra ID → Users → 目标用户 → Overview** 中的对象 ID。
+
+也可用 `GET /v1.0/servicePrincipals?$filter=appId eq '<APPLICATION_CLIENT_ID>'` 查服务主体；查询 Azure SQL 时使用步骤 1.6 的固定资源应用 ID，取返回的 `id`。不要使用应用注册的 Object ID 或其他租户的值。
 
 ```http
 POST https://graph.microsoft.com/v1.0/oauth2PermissionGrants
@@ -70,27 +87,41 @@ Content-Type: application/json
 }
 ```
 
-这里的 `clientId` 是**企业应用的对象 ID**，不是上表的 Application (client) ID；`resourceId` 是 Azure SQL 服务主体在**客户自己租户**中的对象 ID。可在 **企业应用**中查找对应应用，或通过 `GET /v1.0/servicePrincipals?$filter=appId eq '<APPLICATION_CLIENT_ID>'` 查询；查 SQL 资源时使用上面的固定资源应用 ID。`principalId` 是目标用户的对象 ID。
+执行者需符合租户策略的 Entra 管理角色（如 Application Administrator／Cloud Application Administrator），管理工具需 `DelegatedPermissionGrant.ReadWrite.All` 及相应读取权限；**不要把这些管理权限加到 SQL 客户端应用**。已有授权先核对，不重复创建。此步不授予数据库权限，仍须完成步骤 2.4。
 
-执行该 Graph 写操作的管理工具需 `DelegatedPermissionGrant.ReadWrite.All`，执行者还需符合 API 要求的 Entra 角色与租户策略，例如 Application Administrator／Cloud Application Administrator。读取服务主体需适当目录读取权限。这些是**管理工具权限，不加到 SQL 客户端应用**；普通用户不需管理员权限。已有授权时由管理员核对后更新，勿重复创建。应用同意**不等于 SQL 数据库权限**。
+</details>
 
 ## 2. Azure SQL 服务端配置
 
-| 位置 | 客户需要配置什么 |
-| --- | --- |
-| Azure 门户 → SQL 服务器 → Microsoft Entra ID | 设置本租户的 Entra 管理员，用于首次创建数据库用户；**普通使用者不设为管理员** |
-| SQL 数据库 | 本例为 `auth-test`；客户端必须显式指定目标数据库 |
-| SQL 服务器 → 网络 | 优先使用 Private Endpoint，并保证客户端 VPN／路由及 Private DNS 正常；若组织允许公共访问，仅允许真实客户端 SQL 出口 IP |
-| 客户端连接 | 使用 `<SQL_SERVER_FQDN>,1433`；保留 `Encrypt=true`、`TrustServerCertificate=false` |
-| 数据库授权 | 为目标 Entra 用户／组创建 contained user，只授予查询所需权限 |
+### 2.1 设置 SQL 服务器的 Entra 管理员
 
-**SQL 服务器 → Microsoft Entra ID：** 实际页面显示已配置 Entra 管理员，账户及对象 ID 已遮盖。图中还启用了“仅 Microsoft Entra 身份验证”；这是实验服务器的设置，**不是 WAM 的必要条件**，客户应按自身认证策略决定是否禁用 SQL 密码认证。
+打开 **Azure Portal → SQL servers → 目标逻辑服务器 → Microsoft Entra ID → Set admin**，选择本租户的管理账户／组并保存。管理员用于下一步创建数据库用户，**不要将普通使用者设为服务器管理员**。
 
-![Azure Portal 中已配置的 SQL Entra 管理员与实验服务器的仅 Entra 认证设置](docs/images/portal-sql-entra-admin.png)
+下图显示已配置的管理员，账户和对象 ID 已遮盖。
 
-网络需符合客户策略；不要用策略例外标签或放宽整个 Internet 地址范围解决连接问题。Azure SQL Redirect 连接策略可能还需要额外数据端口，按实际网络架构配置。
+![Azure Portal SQL 服务器中 Set admin 入口及已配置的 Entra 管理员](docs/images/portal-sql-entra-admin.png)
 
-SQL 管理员连接 **`auth-test` 数据库，而不是 `master`**，执行以下首次演示脚本。替换虚构 UPN；同名对象已存在时先核对，不要直接覆盖。
+### 2.2 确认数据库和服务器地址
+
+打开 **SQL databases → 目标数据库 → Overview**。本例使用已存在的 **`auth-test`**；记录页面上的 **Server name** 作为 `<SQL_SERVER_FQDN>`，客户端同时指定该数据库名，不能连接到 `master` 代替。
+
+![Azure Portal 数据库概述、Server name 字段和左侧 Query editor 入口，环境标识已遮盖](docs/images/portal-sql-database.png)
+
+### 2.3 配置客户端到 SQL 的网络
+
+打开 **SQL server → Networking**。下图是实验环境的 **Public access → Selected networks** 页面；**仅当客户组织允许公网时**，在 Firewall rules 添加真实 SQL 出口 IP，单个 IP 的 Start / End 填同一地址并保存。不要直接照抄实验规则或使用整个 Internet 范围。
+
+![Azure Portal 网络页面选择 Selected networks](docs/images/portal-sql-network.png)
+
+同一页面的 **Firewall rules → Add a firewall rule**，填写规则名及 Start / End IPv4 address：
+
+![Azure Portal 防火墙规则的名称及起止 IPv4 地址，实验值已遮盖](docs/images/portal-sql-firewall.png)
+
+若组织要求私网，由网络管理员提供 **Private Endpoint、客户端路由／VPN 和 Private DNS**；上图不是私网部署证明。客户端需能解析服务器 FQDN 并连通 TCP 1433，Redirect 连接策略还需对应数据端口。
+
+### 2.4 创建数据库用户并授予查询权限
+
+SQL 管理员使用支持 Entra 登录的 SQL 工具连接 **`auth-test`**，执行下方初始化脚本；Portal 的数据库 **Query editor** 入口见步骤 2.2 左侧菜单，也可使用组织批准的 SSMS。替换虚构 UPN；同名对象已存在时先核对，不直接覆盖。此步是 SQL 授权，不能用应用 API 权限代替；本文未为补图重新执行脚本。
 
 ```sql
 CREATE TABLE dbo.WamSsoDemo
@@ -104,11 +135,13 @@ CREATE USER [reader@contoso.example] FROM EXTERNAL PROVIDER;
 GRANT SELECT ON OBJECT::dbo.WamSsoDemo TO [reader@contoso.example];
 ```
 
-生产环境可对 Entra 安全组创建数据库用户并授权，便于统一管理成员。创建外部用户需管理员具备适当 SQL 权限及目录主体解析权限，具体取决于执行身份与租户配置。
+创建外部用户的管理员需具备相应 SQL 权限及目录主体解析权限。
 
 ## 3. 客户端连接示例
 
-客户端只需要四项配置：**Tenant ID、Client ID、SQL 服务器 FQDN、数据库名**，没有密码。
+### 3.1 填入连接配置
+
+填写步骤 **1.3** 的 Tenant ID／Client ID 和步骤 **2.2** 的服务器 FQDN／数据库名：
 
 ```powershell
 $env:WAM_SQL_TENANT_ID = '<TENANT_ID>'
@@ -116,6 +149,12 @@ $env:WAM_SQL_CLIENT_ID = '<CLIENT_ID>'
 $env:WAM_SQL_SERVER = '<SQL_SERVER_FQDN>' # 例如 your-server.database.windows.net
 $env:WAM_SQL_DATABASE = 'auth-test'
 ```
+
+**连接加密是客户端代码配置，不是额外的 Portal 开关。** 下方示例已指定 TCP 1433、`Encrypt=true`、`TrustServerCertificate=false`，并用 WAM 令牌连接，不填 SQL 用户名／密码。
+
+### 3.2 编译并运行两次
+
+在步骤 1.1 的 Windows 用户桌面按下方命令运行，不使用 SYSTEM 或 Windows 服务。
 
 <details>
 <summary>展开：完整 .NET 示例与运行命令</summary>
@@ -256,7 +295,7 @@ dotnet .\bin\Release\net8.0-windows\WamSqlProbe.dll
 if ($LASTEXITCODE -ne 0) { throw '第二次验证失败' }
 ```
 
-保留实测 scope `https://database.windows.net//.default`：SQL 资源结尾 `/` 与 `/.default` 拼接形成双斜杠。不要打印访问令牌；长期运行的应用另需处理令牌过期与连接生命周期。不同窗口宿主需按 WAM 指南提供有效 HWND。
+保留实测 scope `https://database.windows.net//.default`，不要打印访问令牌。
 
 </details>
 
@@ -275,9 +314,7 @@ if ($LASTEXITCODE -ne 0) { throw '第二次验证失败' }
 
 ![两个独立进程的实际 WAM 和 SQL 测试结果文件展示，用户及租户标识已脱敏](docs/images/wam-silent-results.png)
 
-**结果图说明：** 本节结果图与第 1 节 Windows 状态图是既有实测结果文件的脱敏展示截图，不是原始运行时终端截图；与上面的真实 Azure Portal 配置截图来源不同，未为制作截图重新执行云测试。身份字段替换为 `<REDACTED>`，状态与查询结果保持原值。原测试账户已是服务器 Entra 管理员，所以文件中 `databaseUser` 为 `dbo`；客户应使用第 2 节的最小权限用户／组，不需要管理员身份。
-
-本例未使用 CLI／托管身份凭据或自定义持久化令牌缓存；WAM 本身会维护 Windows 登录与令牌状态。已有 SQL 工具必须支持 WAM 或安全的令牌注入，不能仅凭 `sqlcmd -G` 推断可用。
+结果图与步骤 1.1 的状态图是**既有实测结果文件的脱敏展示，不是原始运行时终端截图**，未重新执行云测试。原测试账户已是服务器 Entra 管理员，故图中 `databaseUser=dbo`；客户按步骤 2.4 授予 SELECT 即可，无须管理员身份。
 
 ## 参考
 
