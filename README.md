@@ -1,10 +1,10 @@
-# 客户示例：使用 Windows WAM 静默访问 Azure SQL
+# 示例：使用 Windows WAM 静默访问 Azure SQL
 
-用户已使用 Microsoft Entra 账户登录 Windows，客户端通过 WAM 获取当前用户令牌并连接 Azure SQL，查询时不输入 SQL 密码、不执行 `az login`、不弹出登录窗口。**不要求 Azure VM，不使用托管身份。**
+使用 Microsoft Entra 账户登录 Windows，客户端通过 WAM 获取当前用户令牌并连接 Azure SQL，查询时不输入 SQL 密码、不执行 `az login`、不弹出登录窗口。**不要求 Azure VM，不使用托管身份。**
 
 ## SSO 要求与身份边界
 
-**客户体验是“Windows 已登录，SQL 已授权，打开支持 WAM 的客户端即可查询”**；Windows 登录是前提，不是永远免登录或免 MFA。以下要求针对本例的 **Entra OAuth／WAM 用户令牌路径**，不泛指 Kerberos 等所有 SSO 方式。
+**体验是“Windows 已登录，SQL 已授权，打开支持 WAM 的客户端即可查询”**；Windows 登录是前提，不是永远免登录或免 MFA。以下要求针对本例的 **Entra OAuth／WAM 用户令牌路径**，不泛指 Kerberos 等所有 SSO 方式。
 
 | 要求 | 客户需要明确的细节 |
 | --- | --- |
