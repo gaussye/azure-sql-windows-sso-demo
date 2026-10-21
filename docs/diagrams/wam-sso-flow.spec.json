@@ -1,100 +1,86 @@
 {
-  "canvas": {
-    "width": 1210,
-    "height": 1138,
-    "fps": 20,
-    "frames": 60
-  },
-  "signature": "@WAM",
-  "title": {
-    "prefix": "Windows 当前用户",
-    "highlight": "WAM 静默 SSO",
-    "subtitle": "应用代表用户取 SQL 令牌；SQL 按用户 / 组授权"
-  },
-  "input_title": "运行前提",
-  "inputs": [
-    { "label": "用户桌面", "icon": "folder", "color": "#7ee3d6" },
-    { "label": "登录 / PRT", "icon": "file", "color": "#ff7ab6" },
-    { "label": "应用配置", "icon": "file", "color": "#f4b64e" },
-    { "label": "网络 / TLS", "icon": "file", "color": "#7ee3d6" }
+  "canvas": {"width": 1600, "height": 1190, "fps": 20, "frames": 60},
+  "title": "Windows 当前用户",
+  "highlight": "WAM 静默 SSO",
+  "subtitle": "实线：请求 / 返回；金色虚线：一次性配置关联。动画包含可选链路，不表示每次联网。",
+  "panels": [
+    {"box": [25, 145, 1025, 840], "title": "用户 Windows 电脑（本机）", "color": "#1d8be8", "fill": "#04171e"},
+    {"box": [1080, 145, 495, 840], "title": "Microsoft 云端", "color": "#22c86f", "fill": "#02160a"},
+    {"box": [55, 240, 500, 720], "title": "命令行应用进程", "color": "#7ee3d6", "fill": "#081626"},
+    {"box": [600, 240, 425, 535], "title": "Windows 本机身份组件", "color": "#bd54d3", "fill": "#120814"}
   ],
-  "core": {
-    "title": "运行时：三个阶段",
-    "subtitle": "不是托管身份；不是 az login",
-    "cards": [
-      {
-        "title": "客户端配置",
-        "body": "读取 Client ID / Tenant ID\nCreate + Authority + Broker",
-        "icon": "file"
-      },
-      {
-        "title": "WAM 静默取令牌",
-        "body": "AcquireTokenSilent\nSQL scope + 系统账户",
-        "icon": "shield"
-      },
-      {
-        "title": "SQL 连接与授权",
-        "body": "AccessToken 仅存内存；TLS\n验令牌 → 用户映射 → SELECT",
-        "icon": "db"
-      }
-    ]
-  },
-  "decision": { "title": "成功？", "body": "身份 + 授权\n网络均满足" },
-  "output": { "label": "查询结果", "icon": "file" },
-  "loop_label": "虚线仅为人工修复后重新运行；失败不自动重试",
-  "retry_label": "需 MFA / 同意：退出，不弹窗",
-  "left_panel": {
-    "title": "一次性准备",
-    "badge": "IT / 管理员",
-    "cards": [
-      {
-        "title": "应用注册 / 复用",
-        "body": "Client ID + Tenant ID\nWAM URI；公共客户端无密码",
-        "icon": "file"
-      },
-      {
-        "title": "目标用户同意",
-        "body": "SQL user_impersonation\nPrincipal：本例只授权单用户",
-        "icon": "shield"
-      },
-      {
-        "title": "SQL 用户 + 网络",
-        "body": "用户 SELECT / 网络通路",
-        "icon": "file"
-      }
-    ]
-  },
-  "center_panel": {
-    "title": "WAM 内部路径",
-    "subtitle": "缓存命中直接返回；只有需要时才联系 Entra",
-    "footer": "PRT 不交给应用或 SQL",
-    "cards": [
-      { "title": "代理缓存", "body": "命中直接返回\n否则按需取令牌", "icon": "folder" },
-      { "title": "按需 Entra", "body": "用户 / 应用\n同意 / CA", "icon": "shield" },
-      { "title": "SQL 令牌", "body": "仅 SQL audience\n不是 PRT", "icon": "file" },
-      { "title": "应用内存", "body": "SqlConnection\n.AccessToken", "icon": "package" }
-    ]
-  },
-  "right_panel": {
-    "title": "SQL 校验与实测",
-    "incoming_label": "令牌",
-    "return_label": "判定",
-    "cards": [
-      {
-        "title": "TLS / 网络",
-        "body": "证书校验；TCP 1433\n按 SQL 策略放通附加端口",
-        "icon": "shield"
-      },
-      {
-        "title": "SQL 身份 / 权限",
-        "body": "issuer / audience / 有效期\n用户 / 组映射 + SELECT",
-        "icon": "db"
-      },
-      {
-        "title": "两个新进程成功",
-        "body": "Broker；无交互回退\n实际用户 + 验证标记返回",
-        "icon": "file"
-      }
-    ]
-  }
+  "nodes": [
+    {
+      "box": [95, 285, 420, 110], "title": "命令行程序", "color": "#7ee3d6",
+      "body": "读取 Client ID / Tenant ID\n请求当前用户的 SQL 访问令牌"
+    },
+    {
+      "box": [95, 470, 420, 140], "title": "MSAL（应用进程内库）", "color": "#7ee3d6",
+      "body": "Microsoft Authentication Library\nAcquireTokenSilent + OperatingSystemAccount\nSQL scope；启用 Broker"
+    },
+    {
+      "box": [95, 800, 420, 140], "title": "SQL 驱动（应用进程内）", "color": "#7ee3d6",
+      "body": "Microsoft.Data.SqlClient\n5 应用在内存设置 SqlConnection.AccessToken\n驱动携带 SQL Token；TLS 证书校验"
+    },
+    {
+      "box": [630, 285, 365, 110], "title": "Windows 登录状态 / PRT", "color": "#bd54d3",
+      "body": "Primary Refresh Token（主刷新令牌）\nWindows 身份组件管理；不是服务"
+    },
+    {
+      "box": [630, 470, 365, 160], "title": "WAM", "color": "#bd54d3",
+      "body": "Web Account Manager\nWindows 本机认证代理基础设施\n可用代理缓存命中：直接返回\n需要新令牌：按需请求 Entra"
+    },
+    {
+      "box": [630, 655, 365, 105], "title": "Microsoft AAD Broker Plugin", "color": "#bd54d3",
+      "body": "本机身份组件；与 WAM 概念区分\n此分区不表示精确进程拓扑", "title_size": 20
+    },
+    {
+      "box": [1130, 245, 420, 155], "title": "Application registration", "color": "#f4b64e",
+      "body": "应用注册：Entra 云端配置记录\nClient ID = Application (client) ID（公开标识）\n登记 Broker URI / SQL 委托权限及同意\n不是运行服务，不转发 Token 或 SQL"
+    },
+    {
+      "box": [1130, 470, 420, 160], "title": "Microsoft Entra ID", "color": "#22c86f",
+      "body": "云端令牌签发方；按需校验\n用户 / 应用注册 / 同意 / 条件访问\n签发面向 SQL 的用户访问令牌"
+    },
+    {
+      "box": [1130, 800, 420, 140], "title": "Azure SQL", "color": "#22c86f",
+      "body": "云端资源：校验签发方 / audience / 有效期\nEntra 用户或组映射 + 数据库权限\n获准后执行 SELECT，返回数据"
+    }
+  ],
+  "edges": [
+    {"id": "config", "points": [[1340, 245], [1340, 212], [455, 212], [455, 285]], "style": "dashed", "color": "#f4b64e"},
+    {"id": "request", "points": [[210, 395], [210, 470]], "animate": true},
+    {"id": "app-token", "points": [[415, 470], [415, 395]], "animate": true},
+    {"id": "broker-request", "points": [[515, 510], [630, 510]], "animate": true},
+    {"id": "broker-token", "points": [[630, 575], [515, 575]], "animate": true},
+    {"id": "os-state", "points": [[810, 395], [810, 470]]},
+    {"id": "entra-request", "points": [[995, 510], [1130, 510]], "animate": true, "conditional": true},
+    {"id": "entra-token", "points": [[1130, 575], [995, 575]], "animate": true, "conditional": true},
+    {"id": "set-token", "points": [[95, 340], [75, 340], [75, 830], [95, 830]], "animate": true},
+    {"id": "sql-request", "points": [[515, 845], [1130, 845]], "animate": true},
+    {"id": "sql-result", "points": [[1130, 915], [515, 915]], "animate": true}
+  ],
+  "labels": [
+    {"text": "配置关联：Client ID / Tenant ID（非令牌转发）", "box": [550, 179, 565, 28], "color": "#f4b64e"},
+    {"text": "1 请求\nSQL Token", "box": [105, 405, 98, 55]},
+    {"text": "4 API 返回\nSQL Token", "box": [425, 405, 98, 55]},
+    {"text": "2 静默请求", "box": [515, 478, 115, 25]},
+    {"text": "3 SQL Token", "box": [515, 585, 115, 25]},
+    {"text": "复用系统状态（仅本机）", "box": [815, 410, 205, 48]},
+    {"text": "按需 HTTPS", "box": [995, 478, 135, 25]},
+    {"text": "SQL Token", "box": [995, 585, 135, 25]},
+    {"text": "6 携带 SQL Token + 查询（TLS）", "box": [570, 810, 500, 28]},
+    {"text": "TCP 1433；附加端口按 SQL 连接策略", "box": [570, 855, 500, 28]},
+    {"text": "7 返回查询结果", "box": [620, 922, 400, 28]}
+  ],
+  "notes": [
+    {
+      "box": [25, 1010, 1005, 150], "title": "一次性配置旁注：Broker redirect URI", "color": "#f4b64e",
+      "body": "应用注册中必须登记（不是运行时必经箭头）：\nms-appx-web://microsoft.aad.brokerplugin/<CLIENT_ID>\n不表示云端主动回调本机；本例未跟踪底层协议，不能据此删除该配置。"
+    },
+    {
+      "box": [1050, 1010, 525, 150], "title": "静默边界", "color": "#bd54d3",
+      "body": "PRT 不由业务程序直接读取，不发给 SQL。\n需 MFA / 同意 / 重新认证：失败退出。\n无弹窗、Azure CLI 或托管身份回退。"
+    }
+  ]
 }
