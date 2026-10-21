@@ -1,0 +1,100 @@
+{
+  "canvas": {
+    "width": 1210,
+    "height": 1138,
+    "fps": 20,
+    "frames": 60
+  },
+  "signature": "@WAM",
+  "title": {
+    "prefix": "Windows 当前用户",
+    "highlight": "WAM 静默 SSO",
+    "subtitle": "应用代表用户取 SQL 令牌；SQL 按用户 / 组授权"
+  },
+  "input_title": "运行前提",
+  "inputs": [
+    { "label": "用户桌面", "icon": "folder", "color": "#7ee3d6" },
+    { "label": "登录 / PRT", "icon": "file", "color": "#ff7ab6" },
+    { "label": "应用配置", "icon": "file", "color": "#f4b64e" },
+    { "label": "网络 / TLS", "icon": "file", "color": "#7ee3d6" }
+  ],
+  "core": {
+    "title": "运行时：三个阶段",
+    "subtitle": "不是托管身份；不是 az login",
+    "cards": [
+      {
+        "title": "客户端配置",
+        "body": "读取 Client ID / Tenant ID\nCreate + Authority + Broker",
+        "icon": "file"
+      },
+      {
+        "title": "WAM 静默取令牌",
+        "body": "AcquireTokenSilent\nSQL scope + 系统账户",
+        "icon": "shield"
+      },
+      {
+        "title": "SQL 连接与授权",
+        "body": "AccessToken 仅存内存；TLS\n验令牌 → 用户映射 → SELECT",
+        "icon": "db"
+      }
+    ]
+  },
+  "decision": { "title": "成功？", "body": "身份 + 授权\n网络均满足" },
+  "output": { "label": "查询结果", "icon": "file" },
+  "loop_label": "虚线仅为人工修复后重新运行；失败不自动重试",
+  "retry_label": "需 MFA / 同意：退出，不弹窗",
+  "left_panel": {
+    "title": "一次性准备",
+    "badge": "IT / 管理员",
+    "cards": [
+      {
+        "title": "应用注册 / 复用",
+        "body": "Client ID + Tenant ID\nWAM URI；公共客户端无密码",
+        "icon": "file"
+      },
+      {
+        "title": "目标用户同意",
+        "body": "SQL user_impersonation\nPrincipal：本例只授权单用户",
+        "icon": "shield"
+      },
+      {
+        "title": "SQL 用户 + 网络",
+        "body": "用户 SELECT / 网络通路",
+        "icon": "file"
+      }
+    ]
+  },
+  "center_panel": {
+    "title": "WAM 内部路径",
+    "subtitle": "缓存命中直接返回；只有需要时才联系 Entra",
+    "footer": "PRT 不交给应用或 SQL",
+    "cards": [
+      { "title": "代理缓存", "body": "命中直接返回\n否则按需取令牌", "icon": "folder" },
+      { "title": "按需 Entra", "body": "用户 / 应用\n同意 / CA", "icon": "shield" },
+      { "title": "SQL 令牌", "body": "仅 SQL audience\n不是 PRT", "icon": "file" },
+      { "title": "应用内存", "body": "SqlConnection\n.AccessToken", "icon": "package" }
+    ]
+  },
+  "right_panel": {
+    "title": "SQL 校验与实测",
+    "incoming_label": "令牌",
+    "return_label": "判定",
+    "cards": [
+      {
+        "title": "TLS / 网络",
+        "body": "证书校验；TCP 1433\n按 SQL 策略放通附加端口",
+        "icon": "shield"
+      },
+      {
+        "title": "SQL 身份 / 权限",
+        "body": "issuer / audience / 有效期\n用户 / 组映射 + SELECT",
+        "icon": "db"
+      },
+      {
+        "title": "两个新进程成功",
+        "body": "Broker；无交互回退\n实际用户 + 验证标记返回",
+        "icon": "file"
+      }
+    ]
+  }
+}

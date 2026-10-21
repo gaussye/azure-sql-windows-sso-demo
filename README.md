@@ -2,30 +2,38 @@
 
 用户已使用 Microsoft Entra 账户登录 Windows，客户端通过 WAM 获取当前用户令牌并连接 Azure SQL，查询时不输入 SQL 密码、不执行 `az login`、不弹出登录窗口。**不要求 Azure VM，不使用托管身份。**
 
+## SSO 要求与身份边界
+
+**客户体验是“Windows 已登录，SQL 已授权，打开支持 WAM 的客户端即可查询”**；Windows 登录是前提，不是永远免登录或免 MFA。以下要求针对本例的 **Entra OAuth／WAM 用户令牌路径**，不泛指 Kerberos 等所有 SSO 方式。
+
+| 要求 | 客户需要明确的细节 |
+| --- | --- |
+| Windows 用户上下文 | 本例验证的是加入目标 Entra 租户的 Windows 11、`AzureAdPrt=YES` 和当前用户的交互式桌面；WAM／Broker 必须可用，不在 SYSTEM、服务或模拟其他用户的上下文中运行。PRT 留在操作系统，不交给应用或 SQL。 |
+| 支持 WAM 的客户端 | 客户端必须实际集成 MSAL Broker，配置正确的租户、Client ID 和有效窗口句柄。本例仅证明下方自编客户端可行，不能据此断言 `sqlcmd -G` 或任意 SQL 工具支持该路径。 |
+| 应用标识与复用 | Entra 的这条令牌申请路径需要 `client_id`，但**不要求客户总是新建应用，更不是每用户／每机器一个**。现成客户端可能自带注册；组织已有适用注册也可复用。自编工具由厂商／IT 一次性配置，普通用户可以完全不感知 Client ID。 |
+| 公共客户端与 WAM URI | Client ID 是公开标识，不是密码，也不证明某个软件实例可信；本例不使用 secret。应用注册中需配置 `ms-appx-web://microsoft.aad.brokerplugin/<CLIENT_ID>`，这是 Broker 回调标识，不需要部署 Web 服务、监听端口或配置 DNS。 |
+| 应用同意 | SQL 委托权限 `user_impersonation` 需按组织策略事先同意。本例只验证 `consentType=Principal` 的单用户预同意，不推广全租户授权。**SQL 用户权限不能代替应用同意。** |
+| SQL 身份与权限 | SQL Entra 管理员引导创建目标数据库内的 Entra 用户／组并授予最小 SELECT。**SQL 授权给人／组，不需要为这个公共客户端应用本身创建 SQL 用户或授予 SELECT；应用同意也不会授予 SELECT。** |
+| 网络、TLS 与失败行为 | 客户端需能访问 Entra 令牌端点及目标 SQL 网络，保持 TLS 证书校验。缺少同意、需要 MFA／重新认证等导致静默失败时，本例退出，不回退到交互登录、Azure CLI 或托管身份。 |
+
+**官方依据：** [OAuth 授权码流程参数表](https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-auth-code-flow#request-an-authorization-code)将 `client_id` 列为 required，定义为应用注册分配的 Application (client) ID；这是该 OAuth 流程的规范，不是所有 SSO 协议的定义。[WAM 官方示例](https://learn.microsoft.com/en-us/entra/msal/dotnet/acquiring-tokens/desktop-mobile/wam#enabling-wam)同时使用 `Create("YOUR_CLIENT_ID")` 和 `AcquireTokenSilent(..., OperatingSystemAccount)`，说明复用 Windows 用户状态仍有客户端应用标识；[WAM 回调要求](https://learn.microsoft.com/en-us/entra/msal/dotnet/acquiring-tokens/desktop-mobile/wam#redirect-uri)明确 URI 配置在应用注册中，无需在 MSAL 手工指定 WAM URI。[SqlClient 文档](https://learn.microsoft.com/en-us/sql/connect/ado-net/sql/azure-active-directory-authentication?view=sql-server-ver17#overview)明确“Obtaining a token doesn't grant database permissions”。
+
 ## 调用链路与实现机制
 
 ### 调用链路
 
-```text
-前置：用户以 Entra 账户登录 Windows，操作系统建立登录状态（PRT）
+![Windows 当前用户通过 MSAL WAM 静默访问 Azure SQL 的动态调用图，区分一次性准备、按需取令牌和 SQL 授权](docs/diagrams/wam-sso-flow.gif)
 
-当前用户桌面中的 .NET 客户端
-  → MSAL：AcquireTokenSilent + OperatingSystemAccount
-  → Windows WAM（系统身份验证代理）
-      → 使用代理缓存；需要时借助已有 Windows 登录状态向 Entra ID 申请令牌
-      ← 获得面向 Azure SQL、代表当前用户的访问令牌
-  ← MSAL 返回访问令牌
-  → SqlClient：设置 SqlConnection.AccessToken，经 TLS 连接目标数据库
-  → Azure SQL：验证令牌 → 识别 Entra 用户／组 → 检查数据库权限
-  ← 返回获准查询的数据
-```
+[静态 PNG 大图](docs/diagrams/wam-sso-flow.png) · [可编辑 Excalidraw](docs/diagrams/wam-sso-flow.excalidraw) · [图形 spec JSON](docs/diagrams/wam-sso-flow.spec.json)
 
-### 为什么可以静默连接
+这是机制示意图，不是测试截图。图中虚线仅表示失败退出后由管理员／用户修复前提，再人工运行；不存在自动交互回退。下方各层是上方三个运行阶段的展开，**缓存命中时跳过 Entra 请求，不是每次都访问 Entra**。
 
-1. **复用 Windows 登录，不重新收集密码。** 本例设备已加入 Entra，用户已登录并具备 PRT（Primary Refresh Token，主刷新令牌）。WAM 是 Windows 的 Web Account Manager，负责利用系统账户状态及代理缓存获取令牌；应用不读取 PRT，也不把 PRT 发送给 SQL。
-2. **应用代表用户，而不是使用自己的服务身份。** MSAL 通过 WAM 为 `OperatingSystemAccount` 静默请求 SQL 令牌。Client ID 标识公共客户端，Tenant ID 指定租户；预先完成的 `user_impersonation` 单用户同意允许应用代表该用户访问 SQL，不需要客户端密码或证书。
-3. **令牌认证与数据库授权分开。** 客户端将访问令牌交给 SqlClient，通过启用证书校验的 TLS 连接发送给 Azure SQL。SQL 验证令牌的签发者、目标资源和有效期等，再按目标数据库中的 Entra 用户／组及其权限决定是否允许查询；应用同意本身不会授予 SELECT。
-4. **静默不等于绕过 MFA 或组织策略。** 初次身份验证已在 Windows 登录等前置流程完成。若当前状态不足、尚未同意或策略要求交互，`AcquireTokenSilent` 会失败；本例不调用 `AcquireTokenInteractive`，也不回退到 CLI、密码或托管身份。
+1. **一次性准备：** IT 配置或复用应用注册，取得 Client ID／Tenant ID，配置 WAM URI 和目标用户委托同意；SQL 管理员创建 Entra 用户／组并授予 SELECT；网络管理员准备连通路径。
+2. **Windows 与客户端：** 用户登录 Windows，系统建立 PRT／WAM 账户状态。客户端读取配置，使用 `PublicClientApplicationBuilder.Create(clientId)`、`WithAuthority($"https://login.microsoftonline.com/{tenant}")`、`WithBroker(...)`，通过 `AcquireTokenSilent` 与 `OperatingSystemAccount` 请求 `https://database.windows.net//.default`。
+3. **WAM 与 Entra：** Broker 有可用缓存令牌时直接返回；需要获取新令牌时，使用已有操作系统账户状态，由 Entra 按用户、应用注册、同意及条件访问等要求决定是否签发。需要交互时返回错误（例如 `interaction_required`／`MsalUiRequiredException`），本例不弹窗。
+4. **SqlClient 与 SQL：** 返回的访问令牌目标资源是 SQL，不是 PRT。应用只在内存中赋给 `SqlConnection.AccessToken`，以 `Encrypt=true`、`TrustServerCertificate=false` 连接明确的目标数据库；网络需支持 TCP 1433 及 SQL 连接策略要求的附加端口。SQL 校验签发者、audience、有效期，再映射用户／组并检查 SELECT，返回 `ORIGINAL_LOGIN()` 和验证标记。
+
+WAM（Web Account Manager）是 Windows 系统身份验证代理；PRT（Primary Refresh Token，主刷新令牌）由系统维护。**复用的是已有用户登录状态，不是将 Windows 密码／PRT 传给 SQL，也不是用 Client ID 作为密码登录。**
 
 **后续配置分别解决：** 客户端的 Windows／WAM 状态与应用授权（第 1 节）、SQL 网络与数据库权限（第 2 节）、令牌获取及连接代码（第 3 节）。网络连通是独立前提，取得令牌不会自动放通 SQL 防火墙。
 
@@ -48,7 +56,7 @@
 
 ### 1.2 注册单租户应用
 
-管理员打开 **Azure Portal → Microsoft Entra ID → App registrations（应用注册）→ New registration**：
+**先由客户端厂商／IT 确认是否已有可用注册。** 使用现成客户端时按其说明配置，不自行替换厂商 Client ID；组织已有满足后续 WAM URI、租户与权限要求的注册可复用，跳过新建步骤。本例自编工具需要注册时，管理员打开 **Azure Portal → Microsoft Entra ID → App registrations（应用注册）→ New registration**：
 
 1. Name 填写客户自己的应用名，例如 `WamSqlClient`。
 2. Supported account types 选择 **Single tenant only（仅本组织）**。
@@ -338,6 +346,8 @@ if ($LASTEXITCODE -ne 0) { throw '第二次验证失败' }
 | SQL 连接 | 两次退出码均为 `0`，数据库为 `auth-test` |
 | SQL 当前身份 | `ORIGINAL_LOGIN()` 为实际 Windows 登录的 Entra 用户，不是托管身份 |
 | 查询结果 | 两次均读到 `passwordless-verified` |
+
+该云端 Entra 用户的传统 `Active Directory Integrated`／classic IWA 测试曾返回 `integrated_windows_auth_not_supported_managed_user`；这里的成功结论仅针对上述 WAM Broker 客户端，不代表所有 Integrated 模式或 SQL 工具都支持该用户场景。
 
 ![两个独立进程的实际 WAM 和 SQL 测试结果文件展示，用户及租户标识已脱敏](docs/images/wam-silent-results.png)
 
