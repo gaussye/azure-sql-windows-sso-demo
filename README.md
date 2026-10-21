@@ -43,14 +43,6 @@
 2. **本机请求与返回：** 用户已登录 Windows。命令行程序调用 MSAL 的 `AcquireTokenSilent`，使用 `OperatingSystemAccount` 与 SQL scope `https://database.windows.net//.default`。MSAL 调用 WAM；可用代理缓存命中则直接返回，否则按需静默联系 Entra。SQL 访问令牌沿 **WAM → MSAL → 命令行程序** 的 API 返回路径交回。
 3. **本机驱动与云端 SQL：** 程序只在内存中设置 `SqlConnection.AccessToken`，驱动以 `Encrypt=true`、`TrustServerCertificate=false` 连接目标数据库；网络需支持 TCP 1433 及 SQL 连接策略要求的附加端口。SQL 校验签发者、audience、有效期及用户／组权限，查询结果经驱动返回程序。
 
-**Broker redirect URI 是一次性配置旁注，不画成纯 `AcquireTokenSilent` 的必经运行步骤。** 本例没有底层协议追踪，不能据此断言该 URI 在内部从未使用／校验，也不能删除其注册配置。需要 MFA、同意或重新认证时，静默调用失败退出（例如 `interaction_required`／`MsalUiRequiredException`），不弹窗，不回退到 Azure CLI 或托管身份。
-
-图由[分区布局脚本](docs/diagrams/render_wam_flow.py)复用 Lanshu 技能内置 renderer 的绘制、动画和导出能力生成，源 spec 与三种图保持一致。
-
-**后续配置分别解决：** 客户端的 Windows／WAM 状态与应用授权（第 1 节）、SQL 网络与数据库权限（第 2 节）、令牌获取及连接代码（第 3 节）。网络连通是独立前提，取得令牌不会自动放通 SQL 防火墙。
-
-以下 Portal 配置图由 GitHub Copilot Computer Use 从真实页面截取，仅裁剪并遮盖敏感信息。
-
 ## 1. 客户端配置
 
 ### 1.1 确认 Windows 登录状态
