@@ -1,0 +1,9 @@
+{
+  "timestampUtc": "2026-10-22T05:40:20.870986+00:00",
+  "result": "ARC_SQL_QUERY_SUCCEEDED",
+  "newVmPower": "PowerState/deallocated",
+  "azureResourcesDeleted": false,
+  "topology": "New-subscription Compute; original-subscription/tenant Arc identity and existing SQL",
+  "sqlDatabaseState": "Online",
+  "sqlAutoPauseDelayMinutes": 60
+}

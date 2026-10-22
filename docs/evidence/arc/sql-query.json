@@ -1,0 +1,25 @@
+{
+  "tokenEndpoint": "http://localhost:40342/metadata/identity/oauth2/token",
+  "databaseName": "<EXISTING_TEST_DATABASE>",
+  "userName": "<ARC_SQL_USER>",
+  "result": "ARC_SQL_QUERY_SUCCEEDED",
+  "audience": "https://database.windows.net",
+  "authentication": "explicit Arc endpoint token only; SqlConnection.AccessToken",
+  "fallback": "none",
+  "appidMatchesArcClientId": true,
+  "permissions": {
+    "canSelect": 1,
+    "canInsert": 0,
+    "canUpdate": 0,
+    "canDelete": 0,
+    "dbOwner": 0,
+    "dbDataReader": 0
+  },
+  "marker": "passwordless-verified",
+  "oidMatchesArcPrincipalId": true,
+  "identityQuery": "SELECT ORIGINAL_LOGIN(), USER_NAME(), DB_NAME()",
+  "tenantMatches": true,
+  "rowCount": 1,
+  "table": "dbo.AuthProbe",
+  "originalLogin": "<ARC_CLIENT_ID>@<TENANT_ID>"
+}

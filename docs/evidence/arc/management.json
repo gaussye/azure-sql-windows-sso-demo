@@ -1,0 +1,10 @@
+{
+  "independentSessions": 2,
+  "sameFileRetrieved": true,
+  "evidence": {
+    "guestAgent": "Running",
+    "architecture": "64-bit",
+    "os": "Microsoft Windows 11 Enterprise",
+    "hostname": "<EVAL_MACHINE>"
+  }
+}

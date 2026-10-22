@@ -1,0 +1,8 @@
+{
+  "dbDataReader": false,
+  "sidMatchesArcClientId": true,
+  "mapping": "service-principal application ID SID",
+  "sqlUser": "<ARC_SQL_USER>",
+  "dbOwner": false,
+  "permission": "SELECT ON OBJECT::dbo.AuthProbe"
+}

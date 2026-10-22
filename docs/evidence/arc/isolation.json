@@ -1,0 +1,14 @@
+{
+  "timestampUtc": "2026-10-22T05:38:18.0573468Z",
+  "guestAgent": "Stopped/Disabled",
+  "recoveryTaskPresent": false,
+  "recoveryFired": false,
+  "nativeImdsHttpResponses": 0,
+  "transientCredentialFilesRemaining": 0,
+  "blockedNativeImdsAddresses": [
+    "169.254.169.254",
+    "169.254.169.253"
+  ],
+  "independentSsh": "verified after SQL success",
+  "arcStatus": "Connected"
+}
