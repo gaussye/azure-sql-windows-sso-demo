@@ -1,0 +1,67 @@
+{
+  "startedUtc": "2026-10-22T06:32:59.746631+00:00",
+  "runtimeConfiguration": [
+    "SqlServer",
+    "Database"
+  ],
+  "startRequestedUtc": "2026-10-22T06:33:11.344029+00:00",
+  "before": {
+    "unexpectedIdentityEnvironmentVariables": [],
+    "guestAgent": "Stopped/Disabled",
+    "recoveryTaskPresent": false,
+    "recoveryFired": false,
+    "nativeImdsNoHttpResponse": true,
+    "transientCredentialFiles": 0,
+    "nativeImdsBlockRules": 2,
+    "lastBootUtc": "2026-10-22T06:33:22.8759080Z",
+    "arcStatus": "Connected"
+  },
+  "after": {
+    "unexpectedIdentityEnvironmentVariables": [],
+    "guestAgent": "Stopped/Disabled",
+    "recoveryTaskPresent": false,
+    "recoveryFired": false,
+    "nativeImdsNoHttpResponse": true,
+    "transientCredentialFiles": 0,
+    "nativeImdsBlockRules": 2,
+    "lastBootUtc": "2026-10-22T06:33:22.8759080Z",
+    "arcStatus": "Connected"
+  },
+  "result": "ARC_SQL_SIMPLIFIED_QUERY_SUCCEEDED",
+  "queryCompletedUtc": "2026-10-22T06:36:36.305042+00:00",
+  "marker": "passwordless-verified",
+  "rowCount": 1,
+  "permissions": {
+    "canSelect": 1,
+    "canInsert": 0,
+    "canUpdate": 0,
+    "canDelete": 0,
+    "dbOwner": 0,
+    "dbDataReader": 0
+  },
+  "automaticReconnect": true,
+  "reenrollmentPerformed": false,
+  "nativeIdentityAbsent": true,
+  "extensions": 0,
+  "externalIdentityVerification": {
+    "oidMatchesRetainedArcPrincipal": true,
+    "appidMatchesRetainedArcClient": true,
+    "tenantMatchesOriginalSqlTenant": true,
+    "sqlUserMatchesExistingMinimumUser": true,
+    "verificationInputsPassedToClient": false
+  },
+  "authentication": "explicit Arc endpoint token only; SqlConnection.AccessToken",
+  "fallback": "none",
+  "finalVmPowerState": "PowerState/deallocated",
+  "deallocatedUtc": "2026-10-22T06:36:57.995484+00:00",
+  "finishedUtc": "2026-10-22T06:36:57.995621+00:00",
+  "audience": "https://database.windows.net",
+  "identity": {
+    "originalLogin": "<ARC_CLIENT_ID>@<TENANT_ID>",
+    "userName": "<ARC_SQL_USER>",
+    "databaseName": "<EXISTING_TEST_DATABASE>"
+  },
+  "identityQuery": "SELECT ORIGINAL_LOGIN(), USER_NAME(), DB_NAME()",
+  "table": "dbo.AuthProbe",
+  "tokenEndpoint": "http://localhost:40342/metadata/identity/oauth2/token"
+}

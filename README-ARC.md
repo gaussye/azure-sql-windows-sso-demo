@@ -297,35 +297,44 @@ GRANT SELECT ON OBJECT::dbo.AuthProbe TO [arc-sql-reader];
 
 ## 4. 客户端连接示例
 
-### 4.1 填入非秘密配置
+### 4.1 运行时只需 SQL 地址和数据库名
 
 在 Arc 机器的、具备本地 Token 读取权限的 PowerShell 会话中设置：
 
 ```powershell
 $env:ARC_SQL_SERVER = '<SQL_SERVER_FQDN>'
 $env:ARC_SQL_DATABASE = '<DATABASE_NAME>'
-$env:ARC_SQL_TENANT_ID = '<SQL_AND_ARC_TENANT_ID>'
-$env:ARC_SQL_PRINCIPAL_ID = '<ARC_PRINCIPAL_ID>'
-$env:ARC_SQL_CLIENT_ID = '<ARC_CLIENT_ID>'
-$env:ARC_SQL_USER = 'arc-sql-reader'
 ```
 
-服务器名是 SQL FQDN，不加 `https://`。不设置 SQL 密码，不将管理员 Token 或接入 Token 传给此程序。最终 SQL 查询阶段不需要在这台机器上执行 `az login`。
+服务器名是 SQL FQDN，不加 `https://`。**不需要 Tenant ID、Client ID、Principal ID、SQL 用户名或密码。** Arc Agent 使用已经接入的本机系统身份申请 Token；SQL 根据此前创建的用户映射决定权限。第 2／3 节的身份 ID 用于管理员首次授权和实验核验，不是业务客户端必填配置。不要将管理员 Token 或接入 Token 传给程序，也不需要在机器上执行 `az login`。
 
-### 4.2 请求 Arc SQL Token 并执行查询
+### 4.2 用简化配置实际查询
 
-下面是按实测机制整理的 Windows PowerShell 示例；截图来自本次已保存的实测结果，未为文档重新运行此示例。它显式选择 Arc 端点，**没有 `DefaultAzureCredential` 链或静默回退**。
+将仓库中的 [scripts/Test-ArcSql.ps1](scripts/Test-ArcSql.ps1) 复制到 Arc 机器，从有本地 Token 读取权限的 PowerShell 会话执行：
+
+```powershell
+.\scripts\Test-ArcSql.ps1 `
+  -SqlServer $env:ARC_SQL_SERVER `
+  -Database $env:ARC_SQL_DATABASE
+```
+
+脚本只有 **`SqlServer` 和 `Database` 两个参数**，请求 Arc `localhost:40342` 端点，完成本地 challenge 后将 SQL Token 设置到 `SqlConnection.AccessToken`，查询当前 SQL 身份、既有 marker 和最小有效权限。**没有 `DefaultAzureCredential` 链，也没有 CLI、WAM、原生 VM MI 或交互回退。** 它是针对本文既有 `dbo.AuthProbe` 的测试程序，不是通用业务 SQL 封装。
+
+输出中的 `tokenIdentity` 是为实验核对返回的非秘密身份元数据，**不是传入配置**，不含原始 Token。测试控制端可在程序外将这些值与 Arc 资源对照；SQL 服务验证 Token，本地解码 JWT 仅用于诊断，不代替签名验证。对外分享结果时仍需脱敏真实标识。
+
+**2026-10-22 简化配置重测已成功。** 实际执行的就是上述仓库脚本，只传两项参数；没有把预期身份 ID、SQL 用户名或管理员 Token 传入客户端。程序外再核对返回身份，未将这些核验输入伪装成运行配置。结果见[简化配置重测证据](docs/evidence/arc/simplified-query.json)与第 5.1 节。
+
+下面保留同机制的内联说明，运行复现以仓库脚本为准：
 
 <details>
-<summary>展开：完整 Token challenge、身份检查和 SQL 查询示例</summary>
+<summary>展开：两项配置下的 Token challenge 和 SQL 查询机制</summary>
 
 ```powershell
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 Add-Type -AssemblyName System.Data
 
-foreach ($name in @('ARC_SQL_SERVER', 'ARC_SQL_DATABASE', 'ARC_SQL_TENANT_ID',
-                    'ARC_SQL_PRINCIPAL_ID', 'ARC_SQL_CLIENT_ID', 'ARC_SQL_USER')) {
+foreach ($name in @('ARC_SQL_SERVER', 'ARC_SQL_DATABASE')) {
     if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
         throw "Missing configuration: $name"
     }
@@ -366,21 +375,17 @@ try {
     $part = $part.PadRight($part.Length + ((4 - $part.Length % 4) % 4), '=')
     $claims = [Text.Encoding]::UTF8.GetString(
         [Convert]::FromBase64String($part)) | ConvertFrom-Json
-    $clientId = if ($claims.appid) { $claims.appid } else { $claims.azp }
-    if ($claims.aud.TrimEnd('/') -ne 'https://database.windows.net' -or
-        $claims.tid -ne $env:ARC_SQL_TENANT_ID -or
-        $claims.oid -ne $env:ARC_SQL_PRINCIPAL_ID -or
-        $clientId -ne $env:ARC_SQL_CLIENT_ID) {
-        throw 'Token does not match the expected SQL audience and Arc identity.'
+    if ($claims.aud.TrimEnd('/') -ne 'https://database.windows.net') {
+        throw 'Arc returned a token for an unexpected audience.'
     }
 
     $builder = New-Object System.Data.SqlClient.SqlConnectionStringBuilder
-    $builder.DataSource = "tcp:$($env:ARC_SQL_SERVER),1433"
-    $builder.InitialCatalog = $env:ARC_SQL_DATABASE
-    $builder.Encrypt = $true
-    $builder.TrustServerCertificate = $false
-    $builder.ConnectTimeout = 45
-    $builder.Pooling = $false
+    $builder['Data Source'] = "tcp:$($env:ARC_SQL_SERVER),1433"
+    $builder['Initial Catalog'] = $env:ARC_SQL_DATABASE
+    $builder['Encrypt'] = $true
+    $builder['TrustServerCertificate'] = $false
+    $builder['Connect Timeout'] = 45
+    $builder['Pooling'] = $false
     $connection = New-Object System.Data.SqlClient.SqlConnection
     $connection.ConnectionString = $builder.ConnectionString
     $connection.AccessToken = $token
@@ -420,9 +425,8 @@ try {
 
     $identity = @(Read-Query 'SELECT ORIGINAL_LOGIN() AS originalLogin,
         USER_NAME() AS userName, DB_NAME() AS databaseName;')[0]
-    if ($identity.userName -ne $env:ARC_SQL_USER -or
-        $identity.databaseName -ne $env:ARC_SQL_DATABASE) {
-        throw 'SQL resolved an unexpected database user.'
+    if ($identity.databaseName -ne $env:ARC_SQL_DATABASE) {
+        throw 'SQL resolved an unexpected database.'
     }
     $marker = @(Read-Query 'SELECT id, marker FROM dbo.AuthProbe WHERE id=1;')
     if ($marker.Count -ne 1 -or $marker[0].marker -ne 'passwordless-verified') {
@@ -459,6 +463,12 @@ try {
 
 </details>
 
+### 4.3 首次接入与重启后的行为
+
+`azcmagent connect` 是首次接入操作，**正常重启后不需要重做**。本次简化重测从已解除分配的新机启动，Arc Agent 自动恢复 Connected，复用原系统身份和原 SQL 用户授权，没有再次 connect、登录 Azure 或创建用户。
+
+首次接入仍需有权限的 Azure 身份；第 2.3 节的临时配置文件包含短期接入 Token，并非匿名注册。运行时申请 SQL Token 使用的是 Agent 管理的机器身份，不是该临时接入 Token。系统重装、主动断开接入、身份材料丢失或凭据失效属于另外的修复场景，不能据此承诺任何情况下都无需重新接入。
+
 ## 5. 实测结果
 
 **2026-10-22，新订阅 Compute → 原租户 Arc 系统身份 → 原 SQL 查询成功：**
@@ -481,6 +491,23 @@ try {
 [对应脱敏 JSON](docs/evidence/arc/sql-query.json)
 
 **截图说明：** 本文包含两类图片：第 2／3 节新增的五张 `portal-arc-*.png` 是**真实 Azure Portal UI 截图**，仅裁剪与实色遮盖环境标识，保留实际配置和停机后的 Offline／Disconnected 状态；原五张 `arc-*.png` 则是**已保存实测结果文件的脱敏页面截图，不是原始运行时终端或 Portal 图**，可与对应 JSON 对照。未为补图重启 VM、重跑测试或改云配置，也未借用旧 WAM 图冒充本次结果。公开图片和证据不包含真实订阅／租户／机器／公网 IP／主体标识。
+
+### 5.1 仅 SQL 地址＋数据库名的实际重测
+
+**2026-10-22 北京时间 14:36，再次真实查询成功**；本次按用户新批准的重测范围启动原新机，不是为了生成上述截图，也没有重接 Arc、修改网络／授权或新增云资源。
+
+| 核查项 | 本次实际结果 |
+| --- | --- |
+| 客户端配置 | 仅 `SqlServer`、`Database`；不传 Tenant ID／Client ID／Principal ID／SQL 用户名 |
+| 开机与身份 | 14:33 启动后自动恢复 Arc Connected，复用原身份，无重新接入 |
+| 身份校验边界 | 客户端输出实际 SQL 身份和非秘密 Token 元数据；控制端在程序外核对 Arc 身份，全部匹配 |
+| SQL 查询 | `ORIGINAL_LOGIN()`、`USER_NAME()`、`DB_NAME()` 及原 `dbo.AuthProbe` 查询成功 |
+| marker／有效权限 | 返回 1 行 `passwordless-verified`；SELECT=1，写权限和 db_owner／db_datareader 均为 0 |
+| 原生身份隔离 | 查询前后 Guest Agent Stopped／Disabled；两个 IMDS 均无 HTTP 响应；Compute 原生身份无、扩展数 0 |
+| 认证回退 | 无 CLI／WAM／原生 MI／交互回退；新 PowerShell 进程未发现旧身份校验环境变量 |
+| 收尾 | **14:36:57 已核对新 VM Deallocated**，早于 14:49 上限；资源、原授权和规则保留 |
+
+[完整脱敏重测结果 JSON](docs/evidence/arc/simplified-query.json)。原始 Token 未保存、未公开。首次尝试曾在 SQL 连接前遇到 PowerShell 对 `SqlConnectionStringBuilder.DataSource` 的字典关键字兼容问题，已停机后修正为 `['Data Source']` 等标准键，再按同一批准范围重试成功；仓库脚本和内联示例均已修正，未通过更换身份或扩大权限规避错误。
 
 ## 6. 结束状态、保留变更与费用边界
 
