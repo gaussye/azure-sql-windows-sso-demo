@@ -183,7 +183,21 @@ try {
 & "$env:ProgramFiles\AzureConnectedMachineAgent\azcmagent.exe" show --json
 ```
 
-Portal 打开 **Azure Arc → Machines → 目标机器 → Overview／Identity**，核对 Connected 和系统身份 Object／Principal ID；再在该租户中核对相应服务主体的 Application／Client ID。需要记录：
+Arc 机器成功接入时会自动建立**系统分配托管身份**，不需要像 Azure VM 一样另开 Identity 开关。本次 Portal 的 Arc 机器菜单没有独立 Identity 页，按以下路径核对：
+
+1. 打开 **Azure Arc → Machines → 目标机器 → Overview**，查看 Status；展开 Essentials，点击右侧 **JSON View**。
+2. 在 **Resource JSON** 中找到 `identity`，确认 `type = SystemAssigned`，记录 `principalId` 和 `tenantId`；资源 `type` 应为 `Microsoft.HybridCompute/machines`，不是 Compute VM。
+3. 切到 **Arc 所在的 Microsoft Entra 租户 → Enterprise applications → All applications**，必要时将 Application type 过滤为 **Managed identities**，按机器名查找并用 Object ID 精确核对。打开对应应用的 **Overview → Properties**，读取 Application ID 和 Object ID。**Object ID 对应 Arc principalId，Application ID 才是本例需要的 Client ID。**
+
+![真实 Azure Portal Arc Overview，Essentials 右侧可打开 JSON View；采集时机器已停机，状态为 Offline](docs/images/portal-arc-overview.png)
+
+![真实 Azure Portal Resource JSON，显示 SystemAssigned、principalId、tenantId 和 HybridCompute machines 资源类型](docs/images/portal-arc-identity-json.png)
+
+![真实 Microsoft Entra Enterprise Application Overview，显示 Application ID 与 Object ID 的核对位置](docs/images/portal-arc-enterprise-application.png)
+
+**以上三张是真实 Portal UI 脱敏截图，采集于实验成功且 VM 解除分配之后**，所以 Overview 显示 `Offline`，JSON 显示 `Disconnected`；没有为补图开机，也没有把状态改画成 Connected。运行时 Connected 的证据见本节下方实测结果。黑色遮盖隐藏环境标识，不是 Portal 默认显示内容。企业应用页面仅用于核对身份，**不需要为此分配交互用户或配置委托 API 权限**。
+
+需要记录：
 
 | 占位符 | 来源与含义 |
 | --- | --- |
@@ -212,11 +226,21 @@ GET https://graph.microsoft.com/v1.0/servicePrincipals/<ARC_PRINCIPAL_ID>?$selec
 
 本次复用已有服务器、管理员和 `auth-test`，没有改 Entra 管理员、数据库配置或现有安全标签。管理员连接只用于核对既有 marker 和创建 Arc 最小用户，**不作为最终成功查询身份**。
 
+![真实 Azure Portal SQL server Microsoft Entra ID 页面，显示已有 Entra 管理员、Set admin 入口和现有仅 Entra 认证状态](docs/images/portal-arc-sql-entra-admin.png)
+
+新环境若尚无 Entra 管理员，应由获批管理员通过 **Set admin → 选择用户／组 → Save** 配置；本次已有管理员，补图时未点击这些变更按钮。图中 **Support only Microsoft Entra authentication for this server** 是原服务器已启用的设置，**不是使用 Arc MI 必须新开的开关**，不要为了复现而关闭现有 SQL 密码登录。更不要把 Arc 机器身份设成服务器 Entra 管理员。
+
 ### 3.2 配置 SQL 网络
 
 打开 **SQL server → Networking → Public access／Firewall rules**。仅当组织允许该公网方案时，给测试机**真实 SQL 出口 IPv4**增加单独规则，Start IP = End IP，不填工作站地址来代替机器出口。
 
-本次只新增新 VM 静态公网 IP 的精确规则，未打开 `0.0.0.0` 的 Azure 服务例外、Internet 范围，也没有移除／放宽原规则或策略。SQL 网络页面入口可参考 [原 README 的步骤 2.3](README.md#23-配置客户端到-sql-的网络)，其中图片来自旧 WAM 实验，**不作为本次 Arc 配置截图**。
+本次只新增新 VM 静态公网 IP 的精确规则，未打开 `0.0.0.0` 的 Azure 服务例外、Internet 范围，也没有移除／放宽原规则或策略。
+
+![真实 Azure Portal SQL Networking 页面，Selected networks 已选择，展示 Start 和 End IPv4 字段及未勾选的 Azure services 例外](docs/images/portal-arc-sql-networking.png)
+
+上图为本次服务器的真实配置页：**Selected networks** 已选，Firewall rules 第二行为本次新机规则；另外两行及上方 VNet 规则是原有配置，并非本次新增要求。实际只读核对了第二行 **Start IPv4 address = End IPv4 address = 新机出口地址**；公网 IP 与规则名已遮盖，因此截图用于说明 UI 位置，不能从黑块独立核验数值相等。下方 **Allow Azure services and resources to access this server** 未勾选。
+
+获批配置新环境时，使用 **Add a firewall rule** 填入机器出口单 IP 后再保存；不要误用 **Add your client IPv4 address** 加入浏览器工作站 IP。本轮补图只读查看，未新增、编辑、删除或保存规则。
 
 组织要求私网时，应由网络管理员提供 Private Endpoint、路由和 Private DNS；本次结果不构成私网验证。还需允许 Arc／Entra 必需出站及 SQL 1433／连接策略端口，不能用“SSH 能通”代替这些检查。
 
@@ -264,6 +288,8 @@ GRANT SELECT ON OBJECT::dbo.AuthProbe TO [arc-sql-reader];
 ```
 
 执行者需具备数据库建用户和授权能力。显式 SID 方式要求管理员自行正确核对身份，不会替你完成目录名称解析；它不是绕过身份核验。本文截图将实测数据库别名统一脱敏为 `<ARC_SQL_USER>`。
+
+**这一步是数据库内的 T-SQL 配置，不是 Azure Portal 的 Access control (IAM) 角色分配。** 可以由获批管理员使用 SSMS 等工具连接目标数据库；Portal **SQL databases → 目标数据库 → Query editor (preview)** 也只是执行 T-SQL 的入口，仍需独立的数据库登录及权限。本次没有为补图登录 Query editor 或重新执行授权。SQL server 菜单的 **Identity** 管理的是服务器自身身份，**不是 Arc 机器身份，也不需要仅为本文显式 SID 用户映射而额外开启**。
 
 ![已保存的 Arc 用户映射与表级 SELECT 授权结果，无 db_owner 或 db_datareader](docs/images/arc-sql-grant.png)
 
@@ -454,7 +480,7 @@ try {
 
 [对应脱敏 JSON](docs/evidence/arc/sql-query.json)
 
-**截图说明：** 本文五张结果图均是**已保存实测结果文件的脱敏页面截图，不是原始运行时终端或 Azure Portal 截图**。未重启 VM、未重跑测试、未借用旧 WAM 图冒充本次结果。订阅／租户／机器／公网 IP／真实主体标识未写入公共证据；占位符仅替换环境标识，其余展示值来自原记录。截图可与同目录 JSON 对照。
+**截图说明：** 本文包含两类图片：第 2／3 节新增的五张 `portal-arc-*.png` 是**真实 Azure Portal UI 截图**，仅裁剪与实色遮盖环境标识，保留实际配置和停机后的 Offline／Disconnected 状态；原五张 `arc-*.png` 则是**已保存实测结果文件的脱敏页面截图，不是原始运行时终端或 Portal 图**，可与对应 JSON 对照。未为补图重启 VM、重跑测试或改云配置，也未借用旧 WAM 图冒充本次结果。公开图片和证据不包含真实订阅／租户／机器／公网 IP／主体标识。
 
 ## 6. 结束状态、保留变更与费用边界
 
@@ -463,7 +489,7 @@ try {
 | 保留项 | 最终状态／注意事项 |
 | --- | --- |
 | 新 Compute VM 与依赖 | VM、OS 磁盘、VNet、NSG、NIC、静态公网 IP，共 6 项资源保留；VM 已 Deallocated |
-| Arc 机器资源 | 保留机器及系统身份；图中的 Connected 是停机前实测状态，停机后连接状态会变化 |
+| Arc 机器资源 | 保留机器及系统身份；结果文件中的 Connected 是停机前实测状态，后补 Portal 截图为停机后的 Offline／Disconnected |
 | SQL 授权 | 保留 Arc 数据库用户及仅 `dbo.AuthProbe` SELECT；未授予写权限或数据库角色 |
 | SQL 防火墙 | 保留精确到新机出口单 IPv4 的规则；原规则与策略未变 |
 | 管理网络 | 本次单独批准的仅 TCP443 Any 来源例外保留；不应无审批照搬到客户环境 |
@@ -490,7 +516,7 @@ try {
 | SQL 身份登录失败 | 检查目标数据库、SQL 网络、SQL Entra 管理员及数据库 SID 映射；Arc Connected 不等于已有 SQL 权限 |
 | 想换用 Azure VM 原生 MI | 那是另一条身份路径；不要在本评估隔离仍有效时混用，也不能把其成功算作 Arc Token 成功 |
 
-公共证据均在 [docs/evidence/arc](docs/evidence/arc)，只保留核查所需字段；原始含环境标识的记录不纳入仓库。图像生成器 [docs/render_arc_evidence.py](docs/render_arc_evidence.py) 只读取这些脱敏 JSON，在本地浏览器截图，**没有 Azure 登录或云操作**。复生成需已有 Python Playwright 和 Chromium；也可通过 `--browser` 指定已安装的 Chromium／Edge：
+公共结果文件均在 [docs/evidence/arc](docs/evidence/arc)，只保留核查所需字段；原始含环境标识的记录和 Portal 原图不纳入仓库。图像生成器 [docs/render_arc_evidence.py](docs/render_arc_evidence.py) 只读取这些脱敏 JSON，在本地浏览器截图，**没有 Azure 登录或云操作，也不能生成真实 Portal UI 图**。第 2／3 节的 Portal 图来自已登录浏览器的真实页面采集。复生成五张结果文件图需已有 Python Playwright 和 Chromium；也可通过 `--browser` 指定已安装的 Chromium／Edge：
 
 ```powershell
 python .\docs\render_arc_evidence.py
