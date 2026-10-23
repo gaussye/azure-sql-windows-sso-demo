@@ -6,14 +6,11 @@
 
 ## 1. 方案与前提
 
-```mermaid
-flowchart LR
-    C["本地 Windows<br/>sqlcmd / 支持 Arc 的应用"] -->|"获取 SQL Token"| A["本机 Arc Agent<br/>localhost:40342"]
-    A <-->|"机器身份认证"| E["Microsoft Entra ID"]
-    C -->|"Token + TLS + SQL 查询"| S["Azure SQL<br/>数据库用户 + 最小权限"]
-```
+![Arc 托管身份认证流程：本地应用、驱动与身份 SDK、本机 Arc Agent；云端 Entra ID 签发 Token，客户端携带 Token 直接连接 Azure SQL](docs/images/arc-sql-auth-flow.gif)
 
-Arc 提供机器身份，**SQL 流量仍由客户端直接发往数据库，不经过 Arc 云端代理**。
+[静态图](docs/images/arc-sql-auth-flow.png) · [可编辑 Excalidraw 源文件](docs/images/arc-sql-auth-flow.excalidraw)
+
+应用发起连接后，**本机驱动与身份 SDK** 自动完成质询，向 Arc Agent 获取 **云端 Entra ID 签发的 Token**，再携带 Token 经 TLS 直连 Azure SQL。**Arc 不代理 SQL 流量**；能获取 Token 与是否具有 SQL 表权限是两层独立授权。
 
 | 前提 | 要求 |
 | --- | --- |
