@@ -5,7 +5,7 @@
 **本文验证什么？** 将 **Windows 11 Enterprise 25H2 x64 客户端系统**接入 Arc，以机器身份访问 Azure SQL。已使用 **Microsoft Go sqlcmd v1.10.0** 实测成功，由驱动／SDK 自动获取 Token，无需在应用中保存 SQL 密码、应用 secret 或自写 Token 获取代码。
 
 > [!WARNING]
-> **这是将 Windows 客户端电脑接入 Arc、借用机器身份访问 SQL 的特殊 workaround，不是日常办公 PC／笔记本访问 SQL 的常规推荐方案。**
+> **这是将 Windows 客户端电脑接入 Arc、借用机器身份访问 SQL 的特殊 workaround。**
 >
 > Arc 机器身份是官方能力，但 Windows 10／11 的官方支持仅限持续开机、供电、联网的[类服务器场景](https://learn.microsoft.com/en-us/azure/azure-arc/servers/prerequisites#client-operating-systems)，不能推广为所有办公终端都适用。若 SQL 需要识别当前办公用户，应使用 Entra 用户认证，例如 [WAM 用户 SSO](README.md)；本方案登录 SQL 的是**机器，不是当前 Windows 用户**。
 
