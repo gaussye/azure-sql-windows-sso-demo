@@ -1,0 +1,53 @@
+{
+  "result": "SQLCMD_ARC_MANAGED_IDENTITY_QUERY_SUCCEEDED",
+  "queryCompletedUtc": "2026-10-23T02:16:24.9607854Z",
+  "client": {
+    "name": "Microsoft Go sqlcmd",
+    "release": "v1.10.0",
+    "platform": "windows-amd64",
+    "source": "https://github.com/microsoft/go-sqlcmd/releases/tag/v1.10.0",
+    "archiveSha256": "a4c28332fcc6e497d655e53ac8f4939f4ab170f9cfd32d0fa5081b60f4d9d691",
+    "dependenciesFromTaggedGoMod": {
+      "go-mssqldb": "v1.9.8",
+      "azidentity": "v1.13.1",
+      "MSALGo": "v1.6.0"
+    }
+  },
+  "authentication": "ActiveDirectoryManagedIdentity",
+  "tokenAcquisition": "Internal to sqlcmd and its SDK; no custom token request or AccessToken injection",
+  "identityEndpoint": "http://localhost:40342/metadata/identity/oauth2/token",
+  "imdsEndpoint": "http://localhost:40342",
+  "unexpectedCredentialVariables": [],
+  "fallback": "none; no -G, -U, -P or client/tenant ID",
+  "exitCode": 0,
+  "successfulRunQueryAttempts": 1,
+  "argumentsRedacted": [
+    "-S", "<SQL_SERVER_FQDN>", "-d", "<EXISTING_TEST_DATABASE>",
+    "--authentication-method", "ActiveDirectoryManagedIdentity",
+    "-N", "true", "-l", "60", "-t", "60", "-b", "-r", "1",
+    "-h", "-1", "-y", "0", "-Q", "<SQL_QUERY_BELOW>"
+  ],
+  "sql": "SET NOCOUNT ON;\nSELECT ORIGINAL_LOGIN() AS originalLogin, USER_NAME() AS userName, DB_NAME() AS databaseName,\n JSON_QUERY((SELECT id, marker FROM dbo.AuthProbe WHERE id=1 FOR JSON PATH)) AS markerRows,\n JSON_QUERY((SELECT\n HAS_PERMS_BY_NAME(N'dbo.AuthProbe',N'OBJECT',N'SELECT') AS canSelect,\n HAS_PERMS_BY_NAME(N'dbo.AuthProbe',N'OBJECT',N'INSERT') AS canInsert,\n HAS_PERMS_BY_NAME(N'dbo.AuthProbe',N'OBJECT',N'UPDATE') AS canUpdate,\n HAS_PERMS_BY_NAME(N'dbo.AuthProbe',N'OBJECT',N'DELETE') AS canDelete,\n IS_ROLEMEMBER(N'db_owner') AS dbOwner,\n IS_ROLEMEMBER(N'db_datareader') AS dbDataReader\n FOR JSON PATH, WITHOUT_ARRAY_WRAPPER)) AS permissions\nFOR JSON PATH, WITHOUT_ARRAY_WRAPPER;",
+  "stdoutRedacted": "{\"originalLogin\":\"<ARC_CLIENT_ID>@<TENANT_ID>\",\"userName\":\"<ARC_SQL_USER>\",\"databaseName\":\"<EXISTING_TEST_DATABASE>\",\"markerRows\":[{\"id\":1,\"marker\":\"passwordless-verified\"}],\"permissions\":{\"canSelect\":1,\"canInsert\":0,\"canUpdate\":0,\"canDelete\":0,\"dbOwner\":0,\"dbDataReader\":0}}",
+  "sqlResult": {
+    "originalLogin": "<ARC_CLIENT_ID>@<TENANT_ID>",
+    "userName": "<ARC_SQL_USER>",
+    "databaseName": "<EXISTING_TEST_DATABASE>",
+    "markerRows": [{"id": 1, "marker": "passwordless-verified"}],
+    "permissions": {
+      "canSelect": 1,
+      "canInsert": 0,
+      "canUpdate": 0,
+      "canDelete": 0,
+      "dbOwner": 0,
+      "dbDataReader": 0
+    }
+  },
+  "externalIdentityVerification": {
+    "sqlLoginMatchesRetainedArcClientAndTenant": true,
+    "sqlUserAndDatabaseMatchExistingMinimumGrant": true,
+    "verificationInputsPassedToClient": false,
+    "rawTokenReadOrSavedByTestHarness": false,
+    "scope": "SQL identity and isolated environment; not a fresh JWT claims capture"
+  }
+}

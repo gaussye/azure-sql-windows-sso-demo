@@ -10,17 +10,21 @@ from playwright.sync_api import sync_playwright
 
 ROOT = Path(__file__).resolve().parent
 CAPTURES = (
-    ("management", "独立 SSH 管理通道"),
-    ("isolation", "Arc Connected 与原生 IMDS 隔离"),
-    ("sql-grant", "SQL 最小权限授权"),
-    ("sql-query", "Arc 身份真实 SQL 查询"),
-    ("final-state", "结束后解除分配，资源保留"),
+    ("management", "独立 SSH 管理通道", "2026-10-22"),
+    ("isolation", "Arc Connected 与原生 IMDS 隔离", "2026-10-22"),
+    ("sql-grant", "SQL 最小权限授权", "2026-10-22"),
+    ("sql-query", "Arc 身份真实 SQL 查询", "2026-10-22"),
+    ("final-state", "结束后解除分配，资源保留", "2026-10-22"),
+    ("sqlcmd-query", "Go sqlcmd 原生 Arc 托管身份查询", "2026-10-23"),
+    ("sqlcmd-final-state", "sqlcmd 测试结束与隔离核验", "2026-10-23"),
 )
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--browser", type=Path, help="Optional installed Chromium/Edge executable.")
+    parser.add_argument("--capture", action="append", choices=[item[0] for item in CAPTURES],
+                        help="Render only selected result files; repeat to select multiple.")
     args = parser.parse_args()
     output = ROOT / "images"
     output.mkdir(exist_ok=True)
@@ -32,7 +36,9 @@ def main():
         try:
             page = browser.new_page(viewport={"width": 1360, "height": 900}, device_scale_factor=1)
             page.route("**/*", lambda route: route.abort())
-            for name, title in CAPTURES:
+            for name, title, date in CAPTURES:
+                if args.capture and name not in args.capture:
+                    continue
                 source = ROOT / "evidence" / "arc" / (name + ".json")
                 value = json.loads(source.read_text(encoding="utf-8"))
                 content = html.escape(json.dumps(value, indent=2, ensure_ascii=False))
@@ -45,7 +51,7 @@ def main():
                     'overflow-wrap:anywhere;font:18px/1.5 Consolas,monospace}'
                     "footer{font-size:15px;color:#475569;margin-top:24px}</style>"
                     f"<h1>实测结果文件展示 | {html.escape(title)}（已脱敏）</h1>"
-                    "<p>2026-10-22 已保存记录；未为截图重启 VM 或重新执行云测试。</p>"
+                    f"<p>{date} 已保存记录；未为截图重启 VM 或重新执行云测试。</p>"
                     "<p>这是结果文件展示，不是原始运行时终端或 Azure Portal 截图。</p>"
                     f"<pre>{content}</pre>"
                     f"<footer>来源：docs/evidence/arc/{name}.json；"

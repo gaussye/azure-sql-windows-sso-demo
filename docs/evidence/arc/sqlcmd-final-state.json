@@ -1,0 +1,50 @@
+{
+  "approvedWindowStartUtc": "2026-10-23T02:02:47.932278+00:00",
+  "hardDeadlineUtc": "2026-10-23T02:32:47.932278+00:00",
+  "successfulRunStartRequestedUtc": "2026-10-23T02:13:17.544505+00:00",
+  "queryCompletedUtc": "2026-10-23T02:16:24.9607854Z",
+  "deallocatedUtc": "2026-10-23T02:17:19.018559+00:00",
+  "independentArmCheckedUtc": "2026-10-23T02:18:00.724557+00:00",
+  "result": "SQLCMD_ARC_MANAGED_IDENTITY_QUERY_SUCCEEDED",
+  "finalPower": "PowerState/deallocated",
+  "cleanupErrors": [],
+  "nativeIdentityAbsent": true,
+  "extensions": 0,
+  "arcPrincipalUnchanged": true,
+  "onlyOriginalSsh443CustomNsgRule": true,
+  "noRdpRules": true,
+  "sqlFirewallStillExactVmIp": true,
+  "healthBeforeAndAfter": {
+    "arcStatus": "Connected",
+    "guestAgent": "Stopped/Disabled",
+    "nativeImdsNoHttpResponse": true,
+    "nativeImdsBlockRules": 2,
+    "unexpectedIdentityEnvironmentVariables": [],
+    "transientCredentialFiles": 0,
+    "recoveryTaskPresent": false,
+    "recoveryFired": false
+  },
+  "earlierAttemptsWithinSameWindow": [
+    {
+      "deallocatedUtc": "2026-10-23T02:06:35.769133+00:00",
+      "outcome": "Stopped before SQL: test harness checked modern --help instead of SQL-query -? help; corrected."
+    },
+    {
+      "deallocatedUtc": "2026-10-23T02:12:07.719222+00:00",
+      "outcome": "SQL database temporarily unavailable; client text omitted error number. Added only exact retry-later message to bounded transient classifier."
+    }
+  ],
+  "changes": {
+    "newCloudResources": 0,
+    "sqlOrArcPermissionChanges": false,
+    "networkChangesDuringSqlcmdTest": false,
+    "officialPortableSqlcmdRetainedOnGuest": true,
+    "cloudResourcesRetained": true
+  },
+  "limitations": [
+    "No successful DBeaver GUI query; earlier GUI attempt stopped at remote input blocker.",
+    "Screenshot is a local rendering of redacted saved results, not the live terminal.",
+    "Retained disk, public IP, Arc/Defender and SQL may continue billing.",
+    "Zero transient enrollment payloads does not mean zero retained credentials: the separately authorized local RDP login file remains outside the repository."
+  ]
+}

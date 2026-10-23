@@ -1,10 +1,12 @@
 # 示例：使用 Azure Arc 托管身份访问 Azure SQL
 
-在 Windows 上安装 Azure Connected Machine Agent，由本机程序向 Arc 身份端点申请 SQL 访问令牌，再通过 `SqlConnection.AccessToken` 连接 Azure SQL。**SQL 登录代表这台 Arc 机器，不是 Windows 登录用户；不使用 WAM，也不要求程序保存 SQL 密码或应用 secret。**
+在 Windows 上安装 Azure Connected Machine Agent，使用机器身份连接 Azure SQL：既可由程序申请 Token 后设置 `SqlConnection.AccessToken`，也可由支持 Arc 的客户端自行完成托管身份认证。**SQL 登录代表这台 Arc 机器，不是 Windows 登录用户；不使用 WAM，也不要求程序保存 SQL 密码或应用 secret。**
 
 本例于 **2026-10-22** 完成真实查询：`SELECT ORIGINAL_LOGIN(), USER_NAME(), DB_NAME()`，并读取既有 `dbo.AuthProbe` 的 `passwordless-verified`。原 [WAM README](README.md) 保持不变；本文是另一条身份路径。
 
-> **适用边界：** Arc 面向本地／其他云的机器。本例使用独立 Azure VM 模拟本地 Windows，按微软官方流程隔离原生 Azure 管理能力，**仅供评估测试，不是 Azure VM 的生产部署建议**。正常 Azure VM 应优先使用原生托管身份。本次没有为文档重新开机或重跑查询。
+**2026-10-23 又用官方 Go sqlcmd v1.10.0 实测成功**：显式选择 `ActiveDirectoryManagedIdentity`，客户端内部取 Token，不使用自写 Token 脚本；身份、marker 和仅表级 SELECT 全部匹配。命令见第 4.4 节，结果与脱敏截图见第 5.2 节。DBeaver GUI 查询尚未完成，不能把此次命令行结果当作 GUI／JDBC 实测。
+
+> **适用边界：** Arc 面向本地／其他云的机器。本例使用独立 Azure VM 模拟本地 Windows，按微软官方流程隔离原生 Azure 管理能力，**仅供评估测试，不是 Azure VM 的生产部署建议**。正常 Azure VM 应优先使用原生托管身份。重测均经单独批准；生成截图本身没有重启 VM 或重跑查询。
 
 ## 要求与身份边界
 
@@ -18,6 +20,7 @@
 | SQL 权限 | SQL Entra 管理员创建与 Arc 身份匹配的数据库用户，只授予 `SELECT ON OBJECT::dbo.AuthProbe`；不给 `db_owner`、`db_datareader` 或服务器管理员。Azure RBAC 角色不能代替 SQL 数据权限。 |
 | 网络与 TLS | 管理通道、Arc／Entra 出站与 SQL 网络分别准备；SQL 使用 TCP 1433，并满足连接策略的附加端口要求。`Encrypt=True`、`TrustServerCertificate=False`。 |
 | 失败行为 | Arc challenge、Token 身份、TLS、用户映射或查询失败即失败；不回退到用户 WAM、Azure CLI、原生 VM MI、SQL 密码或交互登录。 |
+| 客户端支持 | “支持 Azure VM MI”不等于“支持 Arc MI”。本次另实测 Go sqlcmd v1.10.0；它的身份 SDK 支持 Arc 本机端点与 challenge。其他客户端／JDBC 驱动需独立核对版本、依赖和 Arc 支持，不能直接外推。 |
 
 ### 与原 WAM 示例的区别
 
@@ -63,6 +66,8 @@ flowchart LR
 2. **本机请求：** 程序向 Arc 端点请求 `resource=https://database.windows.net/`；首次收到 401，按返回路径读取受保护的 challenge，携带 `Authorization: Basic <challenge>` 重试。不要对 challenge 额外做 Base64，也不要打印它。
 3. **身份核对：** 取得 Token 后检查 SQL audience、`tid`、`oid`、`appid`／`azp` 与预期 Arc 身份一致。解码 claims 本身不等于密码学验签；实际令牌有效性仍由 Azure SQL 验证。
 4. **数据库查询：** 设置 `SqlConnection.AccessToken`，执行身份、marker 和有效权限查询。成功后清理内存引用；应用不保存原始 Token。
+
+以上图与四步描述的是显式 Token 示例。第 4.4 节的 sqlcmd 则把 challenge 与 Token 获取交给客户端及其 SDK；测试编排只经 SSH 启动客户端并回收 stdout，不接触原始 Token。
 
 ## 1. 客户端与管理通道准备
 
@@ -469,6 +474,39 @@ try {
 
 首次接入仍需有权限的 Azure 身份；第 2.3 节的临时配置文件包含短期接入 Token，并非匿名注册。运行时申请 SQL Token 使用的是 Agent 管理的机器身份，不是该临时接入 Token。系统重装、主动断开接入、身份材料丢失或凭据失效属于另外的修复场景，不能据此承诺任何情况下都无需重新接入。
 
+### 4.4 不写 Token 脚本：用官方 Go sqlcmd 原生托管身份认证
+
+**本节已真实执行成功，不是仅依据 SDK 文档推断。** 使用 [Microsoft Go sqlcmd v1.10.0](https://github.com/microsoft/go-sqlcmd/releases/tag/v1.10.0) 的 Windows AMD64 便携版，**不是 ODBC 版 sqlcmd**。从官方 release 下载后，先核对 ZIP 的 SHA256，再运行 `sqlcmd.exe --version`：
+
+```text
+a4c28332fcc6e497d655e53ac8f4939f4ab170f9cfd32d0fa5081b60f4d9d691
+```
+
+该 release 的依赖为 `go-mssqldb v1.9.8`、`azidentity v1.13.1`、`MSALGo v1.6.0`；后两者包含 Arc discovery／challenge 实现。**这些是本次实际版本组合，不代表所有旧版 sqlcmd 或其他驱动均支持 Arc。**
+
+在 **Arc 机器本机**、有 Arc Token 读取权限的会话中运行，不是在管理工作站连接远程 SQL 就能借用 Arc 身份。本次进程继承 Agent 设置的以下环境变量；无需填写 Tenant ID、Client ID、SQL 用户名或密码：
+
+```text
+IDENTITY_ENDPOINT=http://localhost:40342/metadata/identity/oauth2/token
+IMDS_ENDPOINT=http://localhost:40342
+```
+
+确认它们指向本机 Arc，且没有意外的 `SQLCMDUSER`／`SQLCMDPASSWORD`／`SQLCMDCLIENTID` 或其他 Azure 用户／应用凭据环境变量。不要把异常环境变量静默清空后假装验证通过。保留第 2／3 节的身份隔离、数据库映射及网络前提。
+
+下面是同一认证方式的简明查询命令；实测完整 `-Q` 查询还包含有效权限检查，原参数与 SQL 见[脱敏执行记录](docs/evidence/arc/sqlcmd-query.json)：
+
+```powershell
+.\sqlcmd.exe -S '<SQL_SERVER_FQDN>' -d '<DATABASE_NAME>' `
+  --authentication-method ActiveDirectoryManagedIdentity `
+  -N true -l 60 -t 60 -b -r 1 `
+  -Q "SET NOCOUNT ON; SELECT ORIGINAL_LOGIN(), USER_NAME(), DB_NAME(); SELECT id, marker FROM dbo.AuthProbe WHERE id=1;"
+if ($LASTEXITCODE -ne 0) { throw 'sqlcmd query failed.' }
+```
+
+`-N true` 要求加密；**不加 `-C`，不跳过服务器证书验证**。不加 `-U`／`-P`，也**不使用 `-G`**：Go sqlcmd 在无用户名密码时的 `-G` 可走 `DefaultAzureCredential`，不能用来证明只有指定 MI 路径。这里的 `--authentication-method ActiveDirectoryManagedIdentity` 是 sqlcmd CLI 选项；JDBC 连接串中的 `authentication=ActiveDirectoryManagedIdentity;` 是另一种配置语法，不能直接作为 sqlcmd 参数。
+
+客户端自行向 Arc 端点获取 SQL Token 并完成登录，不要求管理员再运行 `az login`、自写 Token 获取脚本或传入 `AccessToken`。本轮没有读取 Token claims；在程序外核对 SQL 实际登录与原 Arc Client ID／租户、数据库用户，同时验证原生 MI 不存在和 IMDS 隔离，不能把它说成重新抓取了 `oid`／`aud`。
+
 ## 5. 实测结果
 
 **2026-10-22，新订阅 Compute → 原租户 Arc 系统身份 → 原 SQL 查询成功：**
@@ -490,7 +528,7 @@ try {
 
 [对应脱敏 JSON](docs/evidence/arc/sql-query.json)
 
-**截图说明：** 本文包含两类图片：第 2／3 节新增的五张 `portal-arc-*.png` 是**真实 Azure Portal UI 截图**，仅裁剪与实色遮盖环境标识，保留实际配置和停机后的 Offline／Disconnected 状态；原五张 `arc-*.png` 则是**已保存实测结果文件的脱敏页面截图，不是原始运行时终端或 Portal 图**，可与对应 JSON 对照。未为补图重启 VM、重跑测试或改云配置，也未借用旧 WAM 图冒充本次结果。公开图片和证据不包含真实订阅／租户／机器／公网 IP／主体标识。
+**截图说明：** 本文包含两类图片：第 2／3 节的五张 `portal-arc-*.png` 是**真实 Azure Portal UI 截图**，仅裁剪与实色遮盖环境标识，保留实际配置和停机后的 Offline／Disconnected 状态；其余七张 `arc-*.png`（含第 5.2 节两张 sqlcmd 图）是**已保存实测结果文件的脱敏页面截图，不是原始运行时终端、SQL GUI 或 Portal 图**，可与对应 JSON 对照。未为生成图片重启 VM、重跑测试或改云配置，也未借用旧 WAM 图冒充本次结果。公开图片和证据不包含真实订阅／租户／机器／公网 IP／主体标识。
 
 ### 5.1 仅 SQL 地址＋数据库名的实际重测
 
@@ -509,9 +547,34 @@ try {
 
 [完整脱敏重测结果 JSON](docs/evidence/arc/simplified-query.json)。原始 Token 未保存、未公开。首次尝试曾在 SQL 连接前遇到 PowerShell 对 `SqlConnectionStringBuilder.DataSource` 的字典关键字兼容问题，已停机后修正为 `['Data Source']` 等标准键，再按同一批准范围重试成功；仓库脚本和内联示例均已修正，未通过更换身份或扩大权限规避错误。
 
+### 5.2 Go sqlcmd 原生 MI 实测与截图
+
+**2026-10-23 北京时间 10:16:24，Go sqlcmd v1.10.0 实际查询成功，exit code=0。** 官方客户端在 Arc 机内使用 `ActiveDirectoryManagedIdentity`；SSH 只负责执行和回收结果，不代取或注入 Token。本轮没有新建云资源、修改 SQL／Arc 权限或网络。
+
+| 核查项 | 本次实际结果 |
+| --- | --- |
+| 客户端输入 | SQL FQDN、数据库及明确认证模式；无用户名、密码、Client ID 或 Tenant ID |
+| SQL 身份 | `ORIGINAL_LOGIN()` 匹配既有 `<ARC_CLIENT_ID>@<TENANT_ID>`；`USER_NAME()` 匹配 Arc 最小用户，不是 dbo |
+| 数据与权限 | 既有 `dbo.AuthProbe` 返回 1 行 `passwordless-verified`；SELECT=1，INSERT／UPDATE／DELETE=0，db_owner／db_datareader=0 |
+| 隔离 | 查询前后 Arc Connected、Guest Agent Stopped／Disabled、两个原生 IMDS 无 HTTP 响应；无原生 VM MI、扩展数 0 |
+| 无认证回退 | 无 `-G`／用户凭据／自写 Token／CLI／WAM；客户端明确指定 MI |
+| 收尾 | **10:17:19 核对 Deallocated**，早于原窗口 10:32:47 截止；10:18 独立 ARM 复核仅原 SSH443 规则、无 RDP 规则、SQL 仍精确到原新机单 IP |
+
+![2026-10-23 官方 Go sqlcmd 实际 stdout 的脱敏结果页面：Arc SQL 登录、marker、仅 SELECT 权限及退出码零](docs/images/arc-sqlcmd-query.png)
+
+[完整脱敏客户端参数、SQL 与 stdout](docs/evidence/arc/sqlcmd-query.json)
+
+![2026-10-23 sqlcmd 测试收尾记录：解除分配时间、原生身份隔离、无 RDP 规则和原窗口内重试历史](docs/images/arc-sqlcmd-final-state.png)
+
+[完整脱敏收尾与隔离记录](docs/evidence/arc/sqlcmd-final-state.json)
+
+本轮从 **10:02:47** 首次启动起共用同一 30 分钟上限，未因重试重置预算。首轮在 SQL 前因测试程序误查现代 `--help` 而停止，改用 SQL 查询帮助 `-?`；第二轮收到数据库暂不可用的明确消息，客户端未打印数字错误号，补充该特定消息的有限重试识别。每次失败后均解除分配；最终运行首次查询即成功，没有通过更换身份、关闭 TLS 或扩大权限解决问题。
+
+此前 DBeaver GUI 尝试虽已进入 Windows 桌面，但远端输入阻塞，**没有启动 DBeaver 或完成 GUI SQL 查询**。用户随后改选 sqlcmd，本节仅证明上述 Go 客户端路径成功，不宣称 DBeaver／JDBC 实测通过。先前临时 RDP 规则已恢复／移除；此轮 sqlcmd 未再开放 RDP。
+
 ## 6. 结束状态、保留变更与费用边界
 
-本次按批准约定，在成功后、北京时间 **14:49 硬截止前**，将**新测试 VM 解除分配**，并再次从 Azure 核对 `PowerState/deallocated`。**解除分配不是删除；本次没有删除任何 Azure 资源。**
+首次实验和 10 月 22 日重测均按各自批准窗口将新机解除分配（第 5.1 节为 14:36:57，早于当日 14:49 上限）。**最新 10 月 23 日 sqlcmd 测试于北京时间 10:17:19 再次解除分配**，10:18 独立 Azure 复核 `PowerState/deallocated`。**解除分配不是删除；没有删除任何 Azure 资源。**
 
 | 保留项 | 最终状态／注意事项 |
 | --- | --- |
@@ -521,6 +584,7 @@ try {
 | SQL 防火墙 | 保留精确到新机出口单 IPv4 的规则；原规则与策略未变 |
 | 管理网络 | 本次单独批准的仅 TCP443 Any 来源例外保留；不应无审批照搬到客户环境 |
 | 临时接入材料 | 本次创建的临时凭据输入／配置文件已删除；不删除 Agent 自己管理的身份材料 |
+| 后续客户端／本地登录文件 | 官方便携 sqlcmd 与先前暂存的 DBeaver 留在测试机；另行授权交付的本地 RDP 凭据文件保留在仓库外、ACL 受限，不属于已删除的 Arc 临时接入材料，不提交或截图 |
 | 原有环境 | 旧 WAM VM、旧评估 VM 未修改；结束时只读核对二者均为 Deallocated |
 | SQL 电源状态 | 查询唤醒后为 Online；原 Serverless 自动暂停 60 分钟配置不变，不等于查询一结束立即 Paused |
 
@@ -543,12 +607,16 @@ try {
 | SQL 身份登录失败 | 检查目标数据库、SQL 网络、SQL Entra 管理员及数据库 SID 映射；Arc Connected 不等于已有 SQL 权限 |
 | 想换用 Azure VM 原生 MI | 那是另一条身份路径；不要在本评估隔离仍有效时混用，也不能把其成功算作 Arc Token 成功 |
 
-公共结果文件均在 [docs/evidence/arc](docs/evidence/arc)，只保留核查所需字段；原始含环境标识的记录和 Portal 原图不纳入仓库。图像生成器 [docs/render_arc_evidence.py](docs/render_arc_evidence.py) 只读取这些脱敏 JSON，在本地浏览器截图，**没有 Azure 登录或云操作，也不能生成真实 Portal UI 图**。第 2／3 节的 Portal 图来自已登录浏览器的真实页面采集。复生成五张结果文件图需已有 Python Playwright 和 Chromium；也可通过 `--browser` 指定已安装的 Chromium／Edge：
+公共结果文件均在 [docs/evidence/arc](docs/evidence/arc)，只保留核查所需字段；原始含环境标识的记录和 Portal 原图不纳入仓库。图像生成器 [docs/render_arc_evidence.py](docs/render_arc_evidence.py) 只读取这些脱敏 JSON，在本地浏览器截图，**没有 Azure 登录或云操作，也不能生成真实 Portal UI 图**。第 2／3 节的 Portal 图来自已登录浏览器的真实页面采集。复生成七张结果文件图需已有 Python Playwright 和 Chromium；也可通过 `--browser` 指定已安装的 Chromium／Edge：
 
 ```powershell
 python .\docs\render_arc_evidence.py
+# 只生成本次 sqlcmd 的两张脱敏结果页面截图：
+python .\docs\render_arc_evidence.py --capture sqlcmd-query --capture sqlcmd-final-state
 ```
 
 ## 参考
 
 [Azure VM 仅供评估的 Arc 配置](https://learn.microsoft.com/en-us/azure/azure-arc/servers/plan-evaluate-on-azure-virtual-machine) · [Arc 托管身份与本机 challenge](https://learn.microsoft.com/en-us/azure/azure-arc/servers/managed-identity-authentication) · [azcmagent connect 与配置文件](https://learn.microsoft.com/en-us/azure/azure-arc/servers/azcmagent-connect) · [CREATE USER／SID／TYPE](https://learn.microsoft.com/en-us/sql/t-sql/statements/create-user-transact-sql?view=azuresqldb-current) · [Azure SQL Entra 配置](https://learn.microsoft.com/en-us/azure/azure-sql/database/authentication-aad-configure?view=azuresql) · [SQL 网络连接架构](https://learn.microsoft.com/en-us/azure/azure-sql/database/connectivity-architecture?view=azuresql)
+
+[Go sqlcmd 认证选项](https://learn.microsoft.com/en-us/sql/tools/sqlcmd/sqlcmd-authentication?view=sql-server-ver17) · [Go sqlcmd v1.10.0 官方发布](https://github.com/microsoft/go-sqlcmd/releases/tag/v1.10.0) · [本次版本依赖](https://github.com/microsoft/go-sqlcmd/blob/v1.10.0/go.mod) · [azidentity v1.13.1 MI 源实现](https://github.com/Azure/azure-sdk-for-go/blob/sdk/azidentity/v1.13.1/sdk/azidentity/managed_identity_client.go) · [MSALGo v1.6.0 Arc MI 实现](https://github.com/AzureAD/microsoft-authentication-library-for-go/blob/v1.6.0/apps/managedidentity/managedidentity.go)
